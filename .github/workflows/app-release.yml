@@ -175,11 +175,12 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           cd apps/windows/build
+          ITEMS=("'DeepSeek Harness.exe'" "'Microsoft.Web.WebView2.Core.dll'" "'Microsoft.Web.WebView2.WinForms.dll'" "'WebView2Loader.dll'")
           if [[ -d dsh ]]; then
-            powershell -Command "Compress-Archive -Path 'DeepSeek Harness.exe','dsh' -DestinationPath 'DeepSeek-Harness-${VERSION}-windows-x64.zip' -Force"
-          else
-            powershell -Command "Compress-Archive -Path 'DeepSeek Harness.exe' -DestinationPath 'DeepSeek-Harness-${VERSION}-windows-x64.zip' -Force"
+            ITEMS+=("'dsh'")
           fi
+          LIST=$(IFS=,; echo "${ITEMS[*]}")
+          powershell -Command "Compress-Archive -Path $LIST -DestinationPath 'DeepSeek-Harness-${VERSION}-windows-x64.zip' -Force"
 
       - uses: actions/upload-artifact@v4
         with:
