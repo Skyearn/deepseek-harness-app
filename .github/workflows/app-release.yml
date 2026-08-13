@@ -231,3 +231,6 @@ jobs:
           else
             gh release create "$TAG" dist/*.zip --title "DeepSeek Harness ${VERSION}" --notes "$NOTES"
           fi
+          # A tag deleted and recreated (tag moves) leaves the release untagged
+          # and draft; publish it so the asset is visible.
+          gh release edit "$TAG" --draft=false >/dev/null 2>&1 || true
