@@ -1,14 +1,17 @@
 // DeepSeek Harness macOS app shell.
 //
 // A thin native wrapper around `dsh web`: it resolves the dsh and node
-// executables, launches the web runner in its own process group, opens the
-// default browser at the served URL once the port accepts connections, and on
+// executables, launches the web runner in its own process group, embeds the
+// served UI in a WKWebView window once the port accepts connections, and on
 // quit — Cmd+Q, window close, or a termination signal — terminates the
 // server's process group and verifies the port is released before exiting.
-// The server itself is unchanged; this file only owns its lifecycle.
+// The server itself is unchanged; this file only owns its lifecycle. The
+// system browser is never opened automatically; "Open in Browser" in the menu
+// is the explicit opt-in.
 
 import Cocoa
 import Darwin
+import WebKit
 
 // MARK: - Paths and configuration
 
@@ -281,7 +284,7 @@ final class ServerController {
     private var dshPath = ""
     private var nodePath = ""
     private var pendingFailure: String?
-    private var isQuitting = false
+    private(set) var isQuitting = false
     private var watchdog: Timer?
     private var reaperLock = NSLock()
 
@@ -447,8 +450,7 @@ final class ServerController {
         guard !isQuitting else { return }
         state = .running
         onStateChange?()
-        if UserDefaults.standard.object(forKey: "openBrowserOnLaunch") == nil
-            || UserDefaults.standard.bool(forKey: "openBrowserOnLaunch") {
+        if UserDefaults.standard.bool(forKey: "openBrowserOnLaunch") {
             NSWorkspace.shared.open(url)
         }
     }
@@ -594,10 +596,9 @@ final class ServerController {
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow!
+    private var webView: WKWebView!
     private var statusLabel: NSTextField!
     private var urlField: NSTextField!
-    private var openButton: NSButton!
-    private var restartButton: NSButton!
     private var signalSources: [DispatchSourceSignal] = []
     private var lastFailure: String?
 
@@ -609,7 +610,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         ServerController.shared.onStateChange = { [weak self] in self?.refreshUI() }
         refreshUI()
 
-        if let other = existingInstance() {
+        // Tests pass -singleInstance 0 to run alongside an already-open app on
+        // an isolated port and state dir.
+        let singleInstance = UserDefaults.standard.object(forKey: "singleInstance") == nil
+            || UserDefaults.standard.bool(forKey: "singleInstance")
+        if singleInstance, let other = existingInstance() {
             other.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
             NSApp.terminate(nil)
             return
@@ -638,10 +643,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     /// Another instance of this app is already running; hand it the spotlight.
+    /// The pid must still be alive — a stale LaunchServices entry must not
+    /// count as an instance.
     private func existingInstance() -> NSRunningApplication? {
         let me = ProcessInfo.processInfo.processIdentifier
         return NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
-            .first { $0.processIdentifier != me }
+            .first { $0.processIdentifier != me && processExists($0.processIdentifier) }
     }
 
     // MARK: UI
@@ -655,6 +662,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                         action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Open in Browser", action: #selector(openBrowser(_:)), keyEquivalent: "b")
+        appMenu.addItem(withTitle: "Restart Server", action: #selector(restartServer(_:)), keyEquivalent: "r")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Open Logs", action: #selector(openLogs(_:)), keyEquivalent: "l")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit DeepSeek Harness",
                         action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -663,96 +673,115 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func buildWindow() {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 260),
-                              styleMask: [.titled, .closable, .miniaturizable],
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760),
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
         window.title = "DeepSeek Harness"
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
+        window.minSize = NSSize(width: 640, height: 420)
 
         let content = NSView()
         window.contentView = content
 
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 12
-        stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: content.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-        ])
+        // The embedded UI: the same page a browser would load at the served URL.
+        // A non-persistent data store keeps WebKit off the disk (no HSTS/cache
+        // writes); the server owns all durable state.
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        let web = WKWebView(frame: .zero, configuration: configuration)
+        web.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(web)
 
-        let title = NSTextField(labelWithString: "DeepSeek Harness")
-        title.font = .systemFont(ofSize: 18, weight: .semibold)
+        let bar = NSView()
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        bar.wantsLayer = true
+        bar.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        content.addSubview(bar)
 
-        statusLabel = NSTextField(wrappingLabelWithString: "Starting server…")
-        statusLabel.font = .systemFont(ofSize: 13)
-        statusLabel.preferredMaxLayoutWidth = 360
+        statusLabel = NSTextField(labelWithString: "Starting server…")
+        statusLabel.font = .systemFont(ofSize: 12)
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        bar.addSubview(statusLabel)
 
         urlField = NSTextField(labelWithString: ServerController.shared.url.absoluteString)
-        urlField.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        urlField.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         urlField.textColor = .secondaryLabelColor
+        urlField.translatesAutoresizingMaskIntoConstraints = false
+        bar.addSubview(urlField)
 
-        let buttons = NSStackView()
-        buttons.orientation = .horizontal
-        buttons.spacing = 8
-        openButton = NSButton(title: "Open in Browser", target: self, action: #selector(openBrowser(_:)))
-        restartButton = NSButton(title: "Restart Server", target: self, action: #selector(restartServer(_:)))
-        let logsButton = NSButton(title: "Open Logs", target: self, action: #selector(openLogs(_:)))
-        buttons.addArrangedSubview(openButton)
-        buttons.addArrangedSubview(restartButton)
-        buttons.addArrangedSubview(logsButton)
+        NSLayoutConstraint.activate([
+            web.topAnchor.constraint(equalTo: content.topAnchor),
+            web.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            web.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            web.bottomAnchor.constraint(equalTo: bar.topAnchor),
+            bar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            bar.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            bar.heightAnchor.constraint(equalToConstant: 30),
+            statusLabel.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 12),
+            statusLabel.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            urlField.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -12),
+            urlField.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+        ])
 
-        let hint = NSTextField(wrappingLabelWithString:
-            "Quitting (Cmd+Q) or closing this window stops the server and releases the port.")
-        hint.font = .systemFont(ofSize: 11)
-        hint.textColor = .tertiaryLabelColor
-        hint.preferredMaxLayoutWidth = 360
-
-        stack.addArrangedSubview(title)
-        stack.addArrangedSubview(statusLabel)
-        stack.addArrangedSubview(urlField)
-        stack.addArrangedSubview(buttons)
-        stack.addArrangedSubview(hint)
-
+        self.webView = web
         self.window = window
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
     private func refreshUI() {
-        guard let statusLabel, let urlField, let openButton, let restartButton else { return }
+        guard let statusLabel, let urlField else { return }
         switch ServerController.shared.state {
         case .stopped, .starting:
             statusLabel.stringValue = "Starting server…"
             urlField.stringValue = ServerController.shared.url.absoluteString
-            openButton.isEnabled = false
-            restartButton.isEnabled = false
         case .running:
             statusLabel.stringValue = "Running"
             urlField.stringValue = ServerController.shared.url.absoluteString
-            openButton.isEnabled = true
-            restartButton.isEnabled = true
+            loadWebView()
         case .stopping:
             statusLabel.stringValue = "Stopping…"
-            openButton.isEnabled = false
-            restartButton.isEnabled = false
         case .failed(let message):
             statusLabel.stringValue = "Stopped"
             urlField.stringValue = ""
-            openButton.isEnabled = false
-            restartButton.isEnabled = true
+            showStoppedPage(message)
             if message != lastFailure {
                 lastFailure = message
                 showFailureAlert(message)
             }
         }
+    }
+
+    /// Loads the served page into the embedded web view. Called on every
+    /// transition to `.running`, so a restart reloads the UI.
+    private func loadWebView() {
+        guard !isQuitting, webView != nil else { return }
+        webView.load(URLRequest(url: ServerController.shared.url))
+    }
+
+    /// A minimal in-window error page when the server is down.
+    private func showStoppedPage(_ message: String) {
+        guard !isQuitting, webView != nil else { return }
+        let escaped = message
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+        let html = """
+        <html><head><meta charset="utf-8"><style>
+        body { font-family: -apple-system, sans-serif; padding: 48px; color: #666; }
+        h2 { margin-bottom: 8px; }
+        pre { white-space: pre-wrap; font-size: 12px; }
+        </style></head>
+        <body><h2>Server stopped</h2><pre>\(escaped)</pre></body></html>
+        """
+        webView.loadHTMLString(html, baseURL: nil)
+    }
+
+    private var isQuitting: Bool {
+        ServerController.shared.isQuitting
     }
 
     private func showFailureAlert(_ message: String) {

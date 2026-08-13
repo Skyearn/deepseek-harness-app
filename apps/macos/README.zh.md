@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-`apps/macos` 下围绕 `dsh web` 的一个轻量原生 macOS 壳。Web 运行器本身完全不变：应用启动同一个端口上的同一个服务，并打开默认浏览器，与在终端里执行 `dsh web` 完全一致。壳额外提供的是标准 macOS 形态与进程所有权——Dock 图标、窗口，以及有保障的清理：退出应用（Cmd+Q、关闭窗口或收到终止信号）会终止服务端的进程组，并在应用退出前确认端口已释放。
+`apps/macos` 下围绕 `dsh web` 的一个轻量原生 macOS 壳。Web 运行器本身完全不变：应用启动同一个端口上的同一个服务，并在内嵌的 WKWebView 窗口里显示界面——与浏览器加载该地址所见的页面一致。壳额外提供的是标准 macOS 形态与进程所有权——Dock 图标、带内嵌界面的窗口，以及有保障的清理：退出应用（Cmd+Q、关闭窗口或收到终止信号）会终止服务端的进程组，并在应用退出前确认端口已释放。系统浏览器永远不会被自动打开；菜单里的「Open in Browser」（Cmd+B）才是显式选择。
 
 ## 环境要求
 
@@ -32,7 +32,7 @@ apps/macos/build.sh --output-dir /tmp  # place the .app elsewhere
 
 1. 启动时应用解析 `dsh` 与 `node` 可执行文件——`dshPath`/`nodePath` 偏好设置，其次是 `Contents/Resources/dsh` 下的内嵌安装（`--bundle-dsh`），最后是按 PATH 风格的搜索，包括 Homebrew、npm 全局、nvm、asdf、volta、bun 与 `~/.npm/_npx` 缓存。
 2. 它以独立进程组的形式把 `dsh web` 作为子进程拉起，服务端输出追加到 `~/Library/Logs/DeepSeek Harness/server.log`。
-3. 一旦 `127.0.0.1:<端口>` 接受连接，就用默认浏览器打开服务地址。
+3. 一旦 `127.0.0.1:<端口>` 接受连接，内嵌的 WKWebView 就加载服务地址。系统浏览器只会在菜单「Open in Browser」或选择启用 `openBrowserOnLaunch` 偏好时打开。
 4. 退出——Cmd+Q、Quit 菜单项、关闭窗口或 SIGTERM/SIGINT/SIGHUP——会向服务端进程组发送 SIGTERM，等待端口释放（最多 6 秒），必要时升级为 SIGKILL，并且只触碰应用自己拉起的进程。恰好占用该端口的外部进程会被原样保留。
 5. 如果应用被强杀（SIGKILL、崩溃），孤儿的服务端会继续服务；下次启动会读取记录的 pid，确认其参数与解析出的 `dsh` 匹配后将其终止，再全新启动。
 6. 第二个应用实例会激活已运行的实例并退出；Finder 层面由 `LSMultipleInstancesProhibited` 兜底。
@@ -46,7 +46,7 @@ apps/macos/build.sh --output-dir /tmp  # place the .app elsewhere
 | `port` | `3080` | 以 `--port` 传给 `dsh web` 的端口 |
 | `dshPath` | 自动 | dsh 可执行文件（或其 `lib/bin.js`）的显式路径 |
 | `nodePath` | 自动 | node 可执行文件的显式路径 |
-| `openBrowserOnLaunch` | `YES` | 服务就绪时是否打开默认浏览器 |
+| `openBrowserOnLaunch` | `NO` | 服务就绪时是否额外打开系统浏览器（内嵌视图始终显示） |
 | `stateDir` | `~/Library/Application Support/DeepSeek Harness` | 壳存放 `server.pid`/`app.pid` 锁文件的位置 |
 
 示例——换一个端口提供服务：

@@ -67,7 +67,7 @@ wait_lock() {
 }
 
 launch_app() {
-  DSH_HOME="$TEST_DSH_HOME" "$APP_BIN" -port "$TEST_PORT" -stateDir "$STATE_DIR" -openBrowserOnLaunch 0 >"$LOG" 2>&1 &
+  DSH_HOME="$TEST_DSH_HOME" "$APP_BIN" -port "$TEST_PORT" -stateDir "$STATE_DIR" -openBrowserOnLaunch 0 -singleInstance 0 >"$LOG" 2>&1 &
   APP_PID=$!
   echo "app pid=$APP_PID"
 }

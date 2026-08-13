@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-A thin native macOS wrapper around `dsh web` for `apps/macos`. The web runner itself is unchanged: the app starts the same server on the same port and opens your default browser, exactly like launching `dsh web` in a terminal. What the shell adds is a standard macOS presence and process ownership — a dock icon, a window, and guaranteed cleanup: quitting the app (Cmd+Q, closing the window, or a termination signal) terminates the server's process group and verifies the port is released before the app exits.
+A thin native macOS wrapper around `dsh web` for `apps/macos`. The web runner itself is unchanged: the app starts the same server on the same port and shows the UI in an embedded WKWebView window, exactly like the page a browser would load at the served URL. What the shell adds is a standard macOS presence and process ownership — a dock icon, a window with the embedded UI, and guaranteed cleanup: quitting the app (Cmd+Q, closing the window, or a termination signal) terminates the server's process group and verifies the port is released before the app exits. The system browser is never opened automatically; "Open in Browser" in the menu (Cmd+B) is the explicit opt-in.
 
 ## Requirements
 
@@ -32,7 +32,7 @@ Building needs `swiftc` (Xcode Command Line Tools). The app icon is committed at
 
 1. On launch the app resolves the `dsh` and `node` executables — the `dshPath`/`nodePath` preferences, then a bundled install under `Contents/Resources/dsh` (`--bundle-dsh`), then a PATH-style search including Homebrew, npm globals, nvm, asdf, volta, bun, and `~/.npm/_npx` caches.
 2. It spawns `dsh web` as a child process in its own process group, with the server's output appended to `~/Library/Logs/DeepSeek Harness/server.log`.
-3. Once `127.0.0.1:<port>` accepts connections, the default browser opens the served URL.
+3. Once `127.0.0.1:<port>` accepts connections, the embedded WKWebView loads the served URL. The system browser opens only through the "Open in Browser" menu item or the opt-in `openBrowserOnLaunch` preference.
 4. Quitting — Cmd+Q, the Quit menu item, closing the window, or SIGTERM/SIGINT/SIGHUP — sends SIGTERM to the server's process group, waits for the port to free (up to 6s), escalates to SIGKILL if needed, and only ever touches processes the app itself spawned. A foreign process that happens to hold the port is left alone.
 5. If the app is killed hard (SIGKILL, crash), the orphaned server keeps serving; the next launch detects the recorded pid, verifies its arguments match the resolved `dsh`, terminates it, and starts fresh.
 6. A second app instance activates the running one and exits; `LSMultipleInstancesProhibited` backs this up at the Finder level.
@@ -46,7 +46,7 @@ Preferences live in the `ai.deepseek.harness` domain (`defaults write ai.deepsee
 | `port` | `3080` | Port passed to `dsh web` as `--port` |
 | `dshPath` | auto | Explicit path to the dsh executable (or its `lib/bin.js`) |
 | `nodePath` | auto | Explicit path to the node executable |
-| `openBrowserOnLaunch` | `YES` | Open the default browser when the server is ready |
+| `openBrowserOnLaunch` | `NO` | Additionally open the system browser when the server is ready (the embedded view always shows) |
 | `stateDir` | `~/Library/Application Support/DeepSeek Harness` | Where the shell keeps its `server.pid`/`app.pid` lock files |
 
 Example — serve on a different port:

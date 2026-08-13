@@ -65,7 +65,7 @@ function Stop-LockServers {
 }
 
 function Launch-App {
-  $argList = @('-port', "$testPort", '-stateDir', "`"$stateDir`"", '-openBrowserOnLaunch', '0')
+  $argList = @('-port', "$testPort", '-stateDir', "`"$stateDir`"", '-openBrowserOnLaunch', '0', '-singleInstance', '0')
   $app = Start-Process -FilePath $exe -ArgumentList $argList -PassThru
   $script:appProcesses += $app
   Write-Host "app pid=$($app.Id)"

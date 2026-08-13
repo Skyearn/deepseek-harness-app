@@ -156,6 +156,9 @@ jobs:
         run: |
           EXE="apps/windows/build/DeepSeek Harness.exe"
           test -f "$EXE"
+          test -f "apps/windows/build/Microsoft.Web.WebView2.Core.dll"
+          test -f "apps/windows/build/Microsoft.Web.WebView2.WinForms.dll"
+          test -f "apps/windows/build/WebView2Loader.dll"
           if [[ "${{ steps.decide.outputs.bundle }}" == "true" ]]; then
             test -f "apps/windows/build/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js"
             "$EXE" --resolve

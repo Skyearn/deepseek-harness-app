@@ -21,6 +21,8 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Windows.Forms;
+using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.WinForms;
 using Microsoft.Win32;
 
 namespace DeepSeekHarness
@@ -34,7 +36,8 @@ namespace DeepSeekHarness
         public const string RegistryKey = @"Software\DeepSeek Harness";
 
         public static int Port = 3080;
-        public static bool OpenBrowserOnLaunch = true;
+        public static bool OpenBrowserOnLaunch = false;
+        public static bool SingleInstance = true;
         public static string DshPath;  // explicit path to dsh lib/bin.js
         public static string NodePath; // explicit path to node.exe
         public static string StateDir; // lock/log location override (tests)
@@ -51,6 +54,8 @@ namespace DeepSeekHarness
                         if (value is int) Port = (int)value;
                         value = key.GetValue("openBrowserOnLaunch");
                         if (value is int) OpenBrowserOnLaunch = ((int)value) != 0;
+                        value = key.GetValue("singleInstance");
+                        if (value is int) SingleInstance = ((int)value) != 0;
                         DshPath = key.GetValue("dshPath") as string;
                         NodePath = key.GetValue("nodePath") as string;
                         StateDir = key.GetValue("stateDir") as string;
@@ -73,6 +78,10 @@ namespace DeepSeekHarness
                 else if (arg == "-openBrowserOnLaunch" && i + 1 < args.Length)
                 {
                     OpenBrowserOnLaunch = args[++i] != "0";
+                }
+                else if (arg == "-singleInstance" && i + 1 < args.Length)
+                {
+                    SingleInstance = args[++i] != "0";
                 }
                 else if (arg == "-dshPath" && i + 1 < args.Length)
                 {
@@ -481,6 +490,7 @@ namespace DeepSeekHarness
     internal class MainForm : Form
     {
         private readonly Server server = new Server();
+        private WebView2 web;
         private System.Windows.Forms.Timer lifeTimer;
         private Label statusLabel;
         private Label urlLabel;
@@ -493,69 +503,81 @@ namespace DeepSeekHarness
         public MainForm()
         {
             Text = "DeepSeek Harness";
-            FormBorderStyle = FormBorderStyle.FixedSingle;
-            MaximizeBox = false;
-            ClientSize = new Size(420, 232);
+            ClientSize = new Size(1100, 720);
+            MinimumSize = new Size(640, 420);
             StartPosition = FormStartPosition.CenterScreen;
 
-            Label title = new Label();
-            title.Text = "DeepSeek Harness";
-            title.Font = new Font(SystemFonts.DefaultFont.FontFamily, 14f, FontStyle.Bold);
-            title.Location = new Point(16, 14);
-            title.AutoSize = true;
+            // The embedded UI: the same page a browser would load at the
+            // served URL. WebView2 runs on the Edge runtime installed with
+            // Windows; the control reports a missing runtime through
+            // CoreWebView2InitializationCompleted.
+            web = new WebView2();
+            web.Dock = DockStyle.Fill;
+            web.CoreWebView2InitializationCompleted += delegate(object sender,
+                CoreWebView2InitializationCompletedEventArgs e)
+            {
+                if (!e.IsSuccess)
+                {
+                    MessageBox.Show(this,
+                        "The Microsoft Edge WebView2 runtime is missing. Install it from "
+                        + "https://developer.microsoft.com/microsoft-edge/webview2/",
+                        "WebView2 runtime required", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            };
+
+            Panel bar = new Panel();
+            bar.Dock = DockStyle.Bottom;
+            bar.Height = 36;
 
             statusLabel = new Label();
             statusLabel.Text = "Starting server…";
-            statusLabel.Location = new Point(16, 50);
             statusLabel.AutoSize = true;
+            statusLabel.Location = new Point(12, 10);
+            bar.Controls.Add(statusLabel);
 
             urlLabel = new Label();
             urlLabel.Text = "http://127.0.0.1:" + Settings.Port;
-            urlLabel.Location = new Point(16, 72);
             urlLabel.AutoSize = true;
             urlLabel.ForeColor = SystemColors.GrayText;
-            urlLabel.Font = new Font("Consolas", 9f);
+            urlLabel.Location = new Point(12, 26);
+            bar.Controls.Add(urlLabel);
+
+            FlowLayoutPanel buttons = new FlowLayoutPanel();
+            buttons.Dock = DockStyle.Right;
+            buttons.WrapContents = false;
+            buttons.Height = 36;
+            buttons.Padding = new Padding(0, 5, 8, 0);
 
             openButton = new Button();
             openButton.Text = "Open in Browser";
-            openButton.Location = new Point(16, 106);
-            openButton.Size = new Size(120, 26);
+            openButton.Width = 120;
             openButton.Enabled = false;
             openButton.Click += delegate { Browser.Open(Settings.Port); };
 
             restartButton = new Button();
             restartButton.Text = "Restart";
-            restartButton.Location = new Point(144, 106);
-            restartButton.Size = new Size(80, 26);
+            restartButton.Width = 80;
             restartButton.Enabled = false;
             restartButton.Click += delegate { Restart(); };
 
             Button logsButton = new Button();
             logsButton.Text = "Open Logs";
-            logsButton.Location = new Point(232, 106);
-            logsButton.Size = new Size(90, 26);
+            logsButton.Width = 90;
             logsButton.Click += delegate { OpenLogs(); };
 
             Button quitButton = new Button();
             quitButton.Text = "Quit";
-            quitButton.Location = new Point(330, 106);
-            quitButton.Size = new Size(74, 26);
+            quitButton.Width = 74;
             quitButton.Click += delegate { Close(); };
 
-            Label hint = new Label();
-            hint.Text = "Quitting stops the server and releases the port.";
-            hint.Location = new Point(16, 148);
-            hint.AutoSize = true;
-            hint.ForeColor = SystemColors.GrayText;
+            buttons.Controls.Add(openButton);
+            buttons.Controls.Add(restartButton);
+            buttons.Controls.Add(logsButton);
+            buttons.Controls.Add(quitButton);
+            bar.Controls.Add(buttons);
 
-            Controls.Add(title);
-            Controls.Add(statusLabel);
-            Controls.Add(urlLabel);
-            Controls.Add(openButton);
-            Controls.Add(restartButton);
-            Controls.Add(logsButton);
-            Controls.Add(quitButton);
-            Controls.Add(hint);
+            Controls.Add(web);
+            Controls.Add(bar);
         }
 
         protected override void OnLoad(EventArgs e)
@@ -605,6 +627,7 @@ namespace DeepSeekHarness
                     urlLabel.Text = "http://127.0.0.1:" + Settings.Port;
                     openButton.Enabled = true;
                     restartButton.Enabled = true;
+                    LoadWebView();
                     if (Settings.OpenBrowserOnLaunch) Browser.Open(Settings.Port);
                 }
                 else if (DateTime.Now > readyDeadline)
@@ -615,11 +638,23 @@ namespace DeepSeekHarness
             }
         }
 
+        private void LoadWebView()
+        {
+            try
+            {
+                web.Source = new Uri("http://127.0.0.1:" + Settings.Port);
+            }
+            catch (Exception)
+            {
+            }
+        }
+
         private void Restart()
         {
             server.Terminate();
             ready = false;
             statusLabel.Text = "Starting server…";
+            urlLabel.Text = "http://127.0.0.1:" + Settings.Port;
             openButton.Enabled = false;
             restartButton.Enabled = false;
             readyDeadline = DateTime.Now.AddSeconds(90);
@@ -641,6 +676,7 @@ namespace DeepSeekHarness
         private void Fail(string message)
         {
             statusLabel.Text = "Stopped";
+            urlLabel.Text = "";
             openButton.Enabled = false;
             restartButton.Enabled = true;
             if (message == lastFailure) return;
@@ -706,18 +742,21 @@ namespace DeepSeekHarness
                 return;
             }
 
-            bool createdNew;
-            using (Mutex mutex = new Mutex(true, Settings.BundleId + ".single", out createdNew))
+            bool createdNew = false;
+            Mutex mutex = null;
+            if (Settings.SingleInstance)
             {
+                mutex = new Mutex(true, Settings.BundleId + ".single", out createdNew);
                 if (!createdNew)
                 {
                     MessageBox.Show("DeepSeek Harness is already running.");
                     return;
                 }
-                Application.EnableVisualStyles();
-                Application.SetCompatibleTextRenderingDefault(false);
-                Application.Run(new MainForm());
             }
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.Run(new MainForm());
+            if (mutex != null) mutex.ReleaseMutex();
         }
     }
 }
