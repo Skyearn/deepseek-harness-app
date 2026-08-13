@@ -19,6 +19,7 @@ using System.IO;
 using System.Management;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
