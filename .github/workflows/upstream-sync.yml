@@ -70,18 +70,20 @@ jobs:
           set -euo pipefail
           VERSION="$(npm view @deepseek-ai/dsh version)"
           TAG="dsh-v${VERSION}"
+          SHA="$(git rev-parse HEAD)"
           echo "current @deepseek-ai/dsh version: ${VERSION}"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release ${TAG} already exists; nothing to publish."
             exit 0
           fi
-          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+          # Creating a tag ref via the API fires the same tag push event as a
+          # git push; a tag that exists without a release (a previous build
+          # failure) is deleted first so the event fires again.
+          if gh api "repos/${GH_REPO}/git/refs/tags/${TAG}" >/dev/null 2>&1; then
             echo "Tag ${TAG} exists without a release; recreating it at HEAD to re-trigger the build."
-            gh api --method DELETE "repos/${GH_REPO}/git/refs/tags/${TAG}" >/dev/null || true
-            git tag -f "${TAG}" HEAD
-            git push origin "${TAG}" --force
-          else
-            git tag "${TAG}" HEAD
-            git push origin "${TAG}"
+            gh api --method DELETE "repos/${GH_REPO}/git/refs/tags/${TAG}" >/dev/null
           fi
-          echo "Tag ${TAG} pushed; macos-app-release.yml is building the release."
+          gh api --method POST "repos/${GH_REPO}/git/refs" \
+            -f "ref=refs/tags/${TAG}" \
+            -f "sha=${SHA}"
+          echo "Tag ${TAG} created at ${SHA}; macos-app-release.yml is building the release."
