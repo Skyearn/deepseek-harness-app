@@ -26,6 +26,8 @@ apps/macos/build.sh --output-dir /tmp  # place the .app elsewhere
 
 `.github/workflows/macos-app-release.yml` 构建通用应用并把它挂到 GitHub Release。构建任务在每个拉取请求与 master 推送时作为打包检查运行；发布从 `dsh-v*` 标签挂载产物——标签推送时自动进行，或通过 `workflow_dispatch` 勾选 `publish=true`。发布的应用内嵌精确对应标签版本的 `@deepseek-ai/dsh`，因此该版本必须已发布到 npm；排练构建可勾选 `bundle_dsh=false`。产物为 `DeepSeek-Harness-<版本>-macos-universal.zip`（arm64 + x86_64，ad-hoc 签名）。公证分发需要 Developer ID 证书并在构建后执行 `notarytool`/`stapler`；该签名链尚未接入工作流。
 
+`.github/workflows/upstream-sync.yml` 把整条链路自动化：按计划（每 6 小时——改 cron 即可调整）或手动派发时，先把上游 `deepseek-ai/deepseek-harness` 的 master 合并进 fork 的 master 并推送，再向 npm 查询当前 `@deepseek-ai/dsh` 版本；当 fork 还没有该版本的 Release 时，给合并后的代码树打 `dsh-v<版本>` 标签并推送——从而触发上面的构建挂载工作流。上游通过 npm 发布而不是推送标签，因此 npm 是版本信号；某次构建失败导致有标签无 Release 时，下次运行会把标签重建到 HEAD 重试。派发输入 `sync_only` 只合并不动 Release。
+
 ## 工作方式
 
 1. 启动时应用解析 `dsh` 与 `node` 可执行文件——`dshPath`/`nodePath` 偏好设置，其次是 `Contents/Resources/dsh` 下的内嵌安装（`--bundle-dsh`），最后是按 PATH 风格的搜索，包括 Homebrew、npm 全局、nvm、asdf、volta、bun 与 `~/.npm/_npx` 缓存。
