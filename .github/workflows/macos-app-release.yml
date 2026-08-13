@@ -124,6 +124,9 @@ jobs:
       - name: Attach the app to the Release
         env:
           GH_TOKEN: ${{ github.token }}
+          # gh discovers the repository from git by default; this job has no
+          # checkout, so name the repository explicitly.
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           TAG="$GITHUB_REF_NAME"
