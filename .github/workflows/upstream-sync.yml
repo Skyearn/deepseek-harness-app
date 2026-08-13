@@ -1,14 +1,14 @@
 # Keep the fork in sync with upstream deepseek-ai/deepseek-harness and publish
-# the macOS app release for each new dsh version on npm.
+# the app releases for each new dsh version on npm.
 #
 # On schedule (or manual dispatch) this workflow merges upstream master into the
 # fork's master and pushes it. It then asks npm for the current @deepseek-ai/dsh
 # version; when the fork has no release for it yet, it tags the merged tree
-# `dsh-v<version>` and pushes the tag, which triggers macos-app-release.yml to
-# build the universal app and attach it to the GitHub Release for that tag. A
-# tag that exists without a release (a previous build failure) is recreated at
-# HEAD to re-fire the build. Upstream publishes releases to npm rather than
-# pushing dsh-v* tags, so npm is the release signal.
+# `dsh-v<version>` and pushes the tag, which triggers app-release.yml to build
+# the platform apps and attach them to the GitHub Release for that tag. A tag
+# that exists without a release (a previous build failure) is recreated at HEAD
+# to re-fire the build. Upstream publishes releases to npm rather than pushing
+# dsh-v* tags, so npm is the release signal.
 name: Sync upstream and release macOS app
 
 on:

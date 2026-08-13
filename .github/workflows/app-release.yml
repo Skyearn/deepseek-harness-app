@@ -1,0 +1,229 @@
+# Build the DeepSeek Harness app shells (macOS and Windows) and attach them to
+# a GitHub Release.
+#
+# Build runs without credentials on every pull request and master push so a
+# pull request proves the apps still assemble. Publishing attaches the
+# platform zips to the GitHub Release for the tag: automatically on a dsh-v*
+# tag push, or on manual dispatch with publish=true (which must also run from
+# a dsh-v* tag). The bundled builds embed @deepseek-ai/dsh at the exact tagged
+# version, so that version must be published to npm first.
+name: App Release
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+    tags: ['dsh-v*']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Attach the built apps to a GitHub Release. Must run from a dsh-v* tag.
+        required: true
+        type: boolean
+        default: false
+      bundle_dsh:
+        description: Embed @deepseek-ai/dsh into the apps (self-contained; needs the version published on npm).
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-macos:
+    name: Build DeepSeek Harness.app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Derive version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#dsh-v}"
+          else
+            VERSION="$(node -p "JSON.parse(require('fs').readFileSync('apps/cli/package.json', 'utf8')).version")"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Derived version: ${VERSION}"
+
+      - name: Decide bundling
+        id: decide
+        run: |
+          RELEASE_PUSH="${{ github.event_name == 'push' && github.ref_type == 'tag' }}"
+          if [[ "$RELEASE_PUSH" == "true" || "${{ inputs.publish }}" == "true" || "${{ inputs.bundle_dsh }}" == "true" ]]; then
+            echo "bundle=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "bundle=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the app (universal)
+        env:
+          DSH_BUNDLE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ARGS=(--universal)
+          if [[ "${{ steps.decide.outputs.bundle }}" == "true" ]]; then
+            ARGS+=(--bundle-dsh)
+          fi
+          apps/macos/build.sh "${ARGS[@]}"
+
+      - name: Verify the bundle
+        run: |
+          APP="apps/macos/build/DeepSeek Harness.app"
+          codesign -dv "$APP"
+          plutil -lint "$APP/Contents/Info.plist"
+          test -f "$APP/Contents/Resources/AppIcon.icns"
+          lipo -info "$APP/Contents/MacOS/DeepSeek Harness" | grep -q "x86_64"
+          lipo -info "$APP/Contents/MacOS/DeepSeek Harness" | grep -q "arm64"
+          if [[ "${{ steps.decide.outputs.bundle }}" == "true" ]]; then
+            test -x "$APP/Contents/Resources/dsh/node_modules/.bin/dsh"
+          fi
+          "$APP/Contents/MacOS/DeepSeek Harness" --resolve
+
+      - name: Run the lifecycle test
+        if: ${{ steps.decide.outputs.bundle == 'true' }}
+        run: apps/macos/scripts/test-lifecycle.sh
+
+      - name: Zip the app
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cd apps/macos/build
+          ditto -c -k --sequesterRsrc --keepParent "DeepSeek Harness.app" "DeepSeek-Harness-${VERSION}-macos-universal.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DeepSeek-Harness-macos
+          path: apps/macos/build/DeepSeek-Harness-*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  build-windows:
+    name: Build DeepSeek Harness.exe
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Derive version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#dsh-v}"
+          else
+            VERSION="$(node -p "JSON.parse(require('fs').readFileSync('apps/cli/package.json', 'utf8')).version")"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Derived version: ${VERSION}"
+
+      - name: Decide bundling
+        id: decide
+        shell: bash
+        run: |
+          RELEASE_PUSH="${{ github.event_name == 'push' && github.ref_type == 'tag' }}"
+          if [[ "$RELEASE_PUSH" == "true" || "${{ inputs.publish }}" == "true" || "${{ inputs.bundle_dsh }}" == "true" ]]; then
+            echo "bundle=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "bundle=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the app
+        shell: bash
+        env:
+          DSH_BUNDLE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ARGS=()
+          if [[ "${{ steps.decide.outputs.bundle }}" == "true" ]]; then
+            ARGS+=(-BundleDsh)
+          fi
+          powershell -ExecutionPolicy Bypass -File apps/windows/build.ps1 "${ARGS[@]}"
+
+      - name: Verify the app
+        shell: bash
+        run: |
+          EXE="apps/windows/build/DeepSeek Harness.exe"
+          test -f "$EXE"
+          if [[ "${{ steps.decide.outputs.bundle }}" == "true" ]]; then
+            test -f "apps/windows/build/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js"
+            "$EXE" --resolve
+          fi
+
+      - name: Run the lifecycle test
+        if: ${{ steps.decide.outputs.bundle == 'true' }}
+        shell: pwsh
+        run: apps/windows/scripts/test-lifecycle.ps1
+
+      - name: Zip the app
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cd apps/windows/build
+          if [[ -d dsh ]]; then
+            powershell -Command "Compress-Archive -Path 'DeepSeek Harness.exe','dsh' -DestinationPath 'DeepSeek-Harness-${VERSION}-windows-x64.zip' -Force"
+          else
+            powershell -Command "Compress-Archive -Path 'DeepSeek Harness.exe' -DestinationPath 'DeepSeek-Harness-${VERSION}-windows-x64.zip' -Force"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DeepSeek-Harness-windows
+          path: apps/windows/build/DeepSeek-Harness-*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to GitHub Release
+    if: ${{ github.event_name == 'push' && github.ref_type == 'tag' || inputs.publish }}
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Require a dsh-v* tag for publishing
+        if: github.ref_type != 'tag'
+        run: |
+          echo "::error::Publishing to a GitHub Release requires running from a dsh-v* tag (current ref: $GITHUB_REF_NAME)."
+          exit 1
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: DeepSeek-Harness-*
+          path: dist
+          merge-multiple: true
+
+      - name: Attach the apps to the Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # gh discovers the repository from git by default; this job has no
+          # checkout, so name the repository explicitly.
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          VERSION="${TAG#dsh-v}"
+          if [[ -z "$(ls dist/*.zip 2>/dev/null)" ]]; then
+            echo "::error::no platform zip assets found under dist/"
+            exit 1
+          fi
+          NOTES="DeepSeek Harness ${VERSION} for macOS (universal binary: Apple Silicon + Intel) and Windows (x64)."
+          NOTES+=$'\n\n- Each app launches `dsh web` unchanged and releases its port on quit.'
+          NOTES+=$'\n- macOS builds are signed ad-hoc (not notarized): if Gatekeeper objects on first launch, right-click the app and choose Open.'
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.zip --clobber
+          else
+            gh release create "$TAG" dist/*.zip --title "DeepSeek Harness ${VERSION}" --notes "$NOTES"
+          fi
