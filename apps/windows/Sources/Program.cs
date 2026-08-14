@@ -718,37 +718,44 @@ namespace DeepSeekHarness
             }
         }
 
-        private const string CmdCut = "dsh.cut";
-        private const string CmdCopy = "dsh.copy";
-        private const string CmdPaste = "dsh.paste";
-        private const string CmdSelectAll = "dsh.selectall";
+        private int cutCommandId;
+        private int copyCommandId;
+        private int pasteCommandId;
+        private int selectAllCommandId;
 
         // Supplies the Chinese text-editing context menu. Selecting a custom
-        // command item re-raises the event with SelectedCommandId set, which
-        // is where the edit command actually runs against the page.
+        // command item re-raises the event with SelectedCommandId set to the
+        // id WebView2 assigned when the item was created (the .NET
+        // CreateContextMenuItem overload takes no command id; it is read back
+        // from the returned item), which is where the edit command runs.
         private void OnContextMenuRequested(object sender, CoreWebView2ContextMenuRequestedEventArgs e)
         {
-            if (!string.IsNullOrEmpty(e.SelectedCommandId))
+            if (e.SelectedCommandId != 0)
             {
-                switch (e.SelectedCommandId)
-                {
-                    case CmdCut: _ = web.CoreWebView2.ExecuteScriptAsync("document.execCommand('cut')"); break;
-                    case CmdCopy: _ = web.CoreWebView2.ExecuteScriptAsync("document.execCommand('copy')"); break;
-                    case CmdPaste: _ = web.CoreWebView2.ExecuteScriptAsync("document.execCommand('paste')"); break;
-                    case CmdSelectAll: _ = web.CoreWebView2.ExecuteScriptAsync("document.execCommand('selectAll')"); break;
-                }
+                if (e.SelectedCommandId == cutCommandId) { web.CoreWebView2.ExecuteScriptAsync("document.execCommand('cut')"); }
+                else if (e.SelectedCommandId == copyCommandId) { web.CoreWebView2.ExecuteScriptAsync("document.execCommand('copy')"); }
+                else if (e.SelectedCommandId == pasteCommandId) { web.CoreWebView2.ExecuteScriptAsync("document.execCommand('paste')"); }
+                else if (e.SelectedCommandId == selectAllCommandId) { web.CoreWebView2.ExecuteScriptAsync("document.execCommand('selectAll')"); }
                 e.Handled = true;
                 return;
             }
             e.MenuItems.Clear();
-            e.MenuItems.Add(web.CoreWebView2.Environment.CreateContextMenuItem(
-                "剪切", null, CoreWebView2ContextMenuItemKind.Command, CmdCut));
-            e.MenuItems.Add(web.CoreWebView2.Environment.CreateContextMenuItem(
-                "拷贝", null, CoreWebView2ContextMenuItemKind.Command, CmdCopy));
-            e.MenuItems.Add(web.CoreWebView2.Environment.CreateContextMenuItem(
-                "粘贴", null, CoreWebView2ContextMenuItemKind.Command, CmdPaste));
-            e.MenuItems.Add(web.CoreWebView2.Environment.CreateContextMenuItem(
-                "全选", null, CoreWebView2ContextMenuItemKind.Command, CmdSelectAll));
+            CoreWebView2ContextMenuItem cutItem = web.CoreWebView2.Environment.CreateContextMenuItem(
+                "剪切", null, CoreWebView2ContextMenuItemKind.Command);
+            cutCommandId = cutItem.CommandId;
+            e.MenuItems.Add(cutItem);
+            CoreWebView2ContextMenuItem copyItem = web.CoreWebView2.Environment.CreateContextMenuItem(
+                "拷贝", null, CoreWebView2ContextMenuItemKind.Command);
+            copyCommandId = copyItem.CommandId;
+            e.MenuItems.Add(copyItem);
+            CoreWebView2ContextMenuItem pasteItem = web.CoreWebView2.Environment.CreateContextMenuItem(
+                "粘贴", null, CoreWebView2ContextMenuItemKind.Command);
+            pasteCommandId = pasteItem.CommandId;
+            e.MenuItems.Add(pasteItem);
+            CoreWebView2ContextMenuItem selectAllItem = web.CoreWebView2.Environment.CreateContextMenuItem(
+                "全选", null, CoreWebView2ContextMenuItemKind.Command);
+            selectAllCommandId = selectAllItem.CommandId;
+            e.MenuItems.Add(selectAllItem);
             e.Handled = true;
         }
     }
