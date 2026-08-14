@@ -1924,6 +1924,56 @@
       "doc": "docs/subsystems/feedback.md",
       "symbol": "MessageFeedbackDeleteResult",
       "source": "packages/feedback/message-feedback/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/git.md",
+      "symbol": "GitRepoKey",
+      "source": "packages/git/git/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/git.md",
+      "symbol": "GitRepo",
+      "source": "packages/git/git/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/git.md",
+      "symbol": "GitChangeKind",
+      "source": "packages/git/git/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/git.md",
+      "symbol": "GitStatusEntry",
+      "source": "packages/git/git/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/git.md",
+      "symbol": "GitStatus",
+      "source": "packages/git/git/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/git.md",
+      "symbol": "GitDiffMode",
+      "source": "packages/git/git/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/git.md",
+      "symbol": "GitDiffFile",
+      "source": "packages/git/git/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/git.md",
+      "symbol": "GitCommit",
+      "source": "packages/git/git/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/git.md",
+      "symbol": "GitErrorCode",
+      "source": "packages/git/git/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/git.md",
+      "symbol": "GitError",
+      "source": "packages/git/git/src/types.ts"
     }
   ]
 }

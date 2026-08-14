@@ -73,6 +73,7 @@ const GROUP_ORDER = [
   'sandbox',
   'e2b',
   'fs',
+  'git',
   'skill',
   'compact',
   'subagent',
@@ -450,6 +451,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     consumers: ['tool-fs'],
     companions: ['fs-observation-policy'],
     note: 'tool-fs executes read/write/edit through ctx.fs; fs-sandbox fences mutations by the shared sandbox mode; fs-observation-policy contributes observed-state checks through the fs/* event gate.',
+  },
+  {
+    key: 'git',
+    pkg: 'git',
+    title: 'Git query seam',
+    mode: 'seam',
+    implementations: ['git-local'],
+    consumers: ['tool-git'],
+    note: 'Read-only repository queries (status, diff, log) run through the local CLI backend; tool-git owns the model-facing tools.',
   },
   {
     key: 'compaction',

@@ -642,6 +642,37 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'git',
+    summary: 'Abstract read-only git provider.',
+    description: 'Abstract read-only git provider. Consumers resolve the repository once with GitService.root, then run the three normalized queries against the returned GitRepo handle. A backend may be local (the `git` CLI in the same execution world), remote (an API client), or sandboxed; the normalized result vocabulary must not change between them.',
+    methods: [
+      {
+        signature: 'abstract root(cwd: string | undefined, signal?: AbortSignal): Promise<GitRepo | undefined>',
+        description: 'Detect the repository containing `cwd` (searching parent directories, like git itself), or `undefined` when none exists.',
+        parameters: [{ name: 'cwd', description: 'the directory to search from; `undefined` lets the backend apply its own default.' }, { name: 'signal', description: 'aborts the detection round-trip.' }],
+        returns: 'the resolved repository, or undefined when `cwd` is outside any repository.',
+      },
+      {
+        signature: 'abstract status(request: GitStatusRequest, signal?: AbortSignal): Promise<GitStatus>',
+        description: 'Read the working-tree status of a repository.',
+        parameters: [{ name: 'request', description: 'the resolved repository, optional pathspec, and the entry cap.' }, { name: 'signal', description: 'aborts the read.' }],
+        returns: 'the branch facts and changed paths, with truncation reported.',
+      },
+      {
+        signature: 'abstract diff(request: GitDiffRequest, signal?: AbortSignal): Promise<GitDiff>',
+        description: 'Read a per-file diff between two trees. Content sides are bounded by the request; files over the per-file byte cap or binary are reported without content via GitDiffFile.omitted, and the file count is capped by `maxFiles` with `truncated` set when more changed files exist.',
+        parameters: [{ name: 'request', description: 'the resolved repository, the compared trees, the optional pathspec, and the content caps.' }, { name: 'signal', description: 'aborts the read.' }],
+        returns: 'per-file before/after content in git\'s output order.',
+      },
+      {
+        signature: 'abstract log(request: GitLogRequest, signal?: AbortSignal): Promise<GitLog>',
+        description: 'Read commit history, newest first.',
+        parameters: [{ name: 'request', description: 'the resolved repository, the commit cap, and the optional pathspec.' }, { name: 'signal', description: 'aborts the read.' }],
+        returns: 'at most `count` commits; empty when the repository has no commits.',
+      },
+    ],
+  },
+  {
     key: 'goals',
     summary: 'Goal service (`ctx.goals`) backed exclusively by the owning session log.',
     description: 'Goal service (`ctx.goals`) backed exclusively by the owning session log.',
@@ -3100,6 +3131,58 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'GenericResultView',
     declaration: 'export interface GenericResultView {\n    card: \'generic\';\n    title?: string;\n    content?: ContentBlock[];\n}',
+  },
+  {
+    name: 'GitChangeKind',
+    declaration: 'export type GitChangeKind = \'added\' | \'modified\' | \'deleted\' | \'renamed\' | \'copied\' | \'typechanged\' | \'unmerged\' | \'untracked\';',
+  },
+  {
+    name: 'GitCommit',
+    declaration: 'export interface GitCommit {\n    hash: string;\n    shortHash: string;\n    authorName: string;\n    authorEmail: string;\n    authorDate: string;\n    subject: string;\n    body: string;\n}',
+  },
+  {
+    name: 'GitDiff',
+    declaration: 'export interface GitDiff {\n    repo: GitRepo;\n    files: GitDiffFile[];\n    truncated: boolean;\n}',
+  },
+  {
+    name: 'GitDiffFile',
+    declaration: 'export interface GitDiffFile {\n    path: string;\n    kind: GitChangeKind;\n    oldPath?: string;\n    oldText: string | null;\n    newText: string | null;\n    omitted?: \'binary\' | \'too_large\';\n}',
+  },
+  {
+    name: 'GitDiffMode',
+    declaration: 'export type GitDiffMode = {\n    kind: \'worktree\';\n} | {\n    kind: \'staged\';\n} | {\n    kind: \'range\';\n    base: string;\n    head: string;\n};',
+  },
+  {
+    name: 'GitDiffRequest',
+    declaration: 'export interface GitDiffRequest {\n    repo: GitRepo;\n    mode: GitDiffMode;\n    path?: string;\n    maxFiles: number;\n    maxBytesPerFile: number;\n    maxTotalBytes: number;\n}',
+  },
+  {
+    name: 'GitLog',
+    declaration: 'export interface GitLog {\n    repo: GitRepo;\n    commits: GitCommit[];\n}',
+  },
+  {
+    name: 'GitLogRequest',
+    declaration: 'export interface GitLogRequest {\n    repo: GitRepo;\n    count: number;\n    path?: string;\n}',
+  },
+  {
+    name: 'GitRepo',
+    declaration: 'export interface GitRepo {\n    key: GitRepoKey;\n    root: string;\n    displayRoot: string;\n}',
+  },
+  {
+    name: 'GitRepoKey',
+    declaration: 'export type GitRepoKey = Branded<\'GitRepoKey\'>;',
+  },
+  {
+    name: 'GitStatus',
+    declaration: 'export interface GitStatus {\n    repo: GitRepo;\n    branch: string;\n    detached: boolean;\n    ahead: number;\n    behind: number;\n    entries: GitStatusEntry[];\n    truncated: boolean;\n}',
+  },
+  {
+    name: 'GitStatusEntry',
+    declaration: 'export interface GitStatusEntry {\n    path: string;\n    kind: GitChangeKind;\n    staged: boolean;\n    unstaged: boolean;\n    oldPath?: string;\n}',
+  },
+  {
+    name: 'GitStatusRequest',
+    declaration: 'export interface GitStatusRequest {\n    repo: GitRepo;\n    path?: string;\n    maxEntries: number;\n}',
   },
   {
     name: 'GoalActivation',

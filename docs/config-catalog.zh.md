@@ -626,6 +626,28 @@ export type Config = LocalConfig
 
 来源：[`packages/fs/fs-sandbox/src/index.ts:49`](../packages/fs/fs-sandbox/src/index.ts)
 
+<a id="deepseek-aidsh-git-local"></a>
+
+## `@deepseek-ai/dsh-git-local`
+
+需要：`subprocess`
+
+```ts config-catalog
+/** Plugin config (all optional — `static Config` supplies the defaults). */
+export interface Config {
+  /** The git executable; a bare name resolves through PATH. */
+  gitPath?: string
+  /** Default working directory for repository discovery when a call supplies none. */
+  cwd?: string
+  /** Default per-command deadline in milliseconds. */
+  timeoutMs?: number
+  /** Per-stream in-memory output cap in bytes. */
+  maxOutputBytes?: number
+}
+```
+
+来源：[`packages/git/git-local/src/index.ts:57`](../packages/git/git-local/src/index.ts)
+
 <a id="deepseek-aidsh-goal"></a>
 
 ## `@deepseek-ai/dsh-goal`
@@ -2431,6 +2453,34 @@ export interface Config {
 
 来源：[`packages/fs/tool-fs-search/src/index.ts:73`](../packages/fs/tool-fs-search/src/index.ts)
 
+<a id="deepseek-aidsh-tool-git"></a>
+
+## `@deepseek-ai/dsh-tool-git`
+
+需要：`tools` · `git` · `systemPrompt`
+
+```ts config-catalog
+/** Plugin config (all optional — `Config` supplies the defaults). */
+export interface Config {
+  /** Inclusive cap on status entries returned by `git_status`. */
+  maxStatusEntries?: number
+  /** Inclusive cap on files returned by `git_diff`. */
+  maxDiffFiles?: number
+  /** Per-file byte cap on each diff content side. */
+  maxDiffBytesPerFile?: number
+  /** Inclusive byte cap on the total diff content returned. */
+  maxDiffTotalBytes?: number
+  /** Unified context lines in the rendered diff. */
+  diffContext?: number
+  /** Per-call `unified` values are clamped to this maximum. */
+  maxDiffContext?: number
+  /** Inclusive cap on commits returned by `git_log`. */
+  maxLogCount?: number
+}
+```
+
+来源：[`packages/git/tool-git/src/index.ts:38`](../packages/git/tool-git/src/index.ts)
+
 <a id="deepseek-aidsh-tool-goal"></a>
 
 ## `@deepseek-ai/dsh-tool-goal`
@@ -3102,6 +3152,7 @@ export interface Config {
 - `@deepseek-ai/dsh-compaction` — 抽象 `CompactionEngine`（[`packages/compaction/compaction/src/index.ts`](../packages/compaction/compaction/src/index.ts)）
 - `@deepseek-ai/dsh-credentials` — 抽象 `Credentials`（[`packages/credentials/credentials/src/index.ts`](../packages/credentials/credentials/src/index.ts)）
 - `@deepseek-ai/dsh-fs` — 抽象 `FileSystem`（[`packages/fs/fs/src/index.ts`](../packages/fs/fs/src/index.ts)）
+- `@deepseek-ai/dsh-git` — 抽象 `GitService`（[`packages/git/git/src/index.ts`](../packages/git/git/src/index.ts)）
 - `@deepseek-ai/dsh-host-directory-picker` — 抽象 `DirectoryPicker`（[`packages/host/directory-picker/src/index.ts`](../packages/host/directory-picker/src/index.ts)）
 - `@deepseek-ai/dsh-jobs` — 抽象 `JobRegistry`（[`packages/jobs/jobs/src/index.ts`](../packages/jobs/jobs/src/index.ts)）
 - `@deepseek-ai/dsh-sandbox` — 抽象 `SandboxProvider`（[`packages/sandbox/sandbox/src/index.ts`](../packages/sandbox/sandbox/src/index.ts)）

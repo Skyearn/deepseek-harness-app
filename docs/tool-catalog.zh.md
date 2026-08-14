@@ -27,6 +27,7 @@
 | `@deepseek-ai/dsh-tool-str-replace-editor` | `str_replace_editor` | `ctx.tools`、`ctx.fs` | `tool/call`、`fs/observed after view presence/absence, edit absence, or successful mutation`、`tool/result` | - | 基于文件系统 seam 的独立查看／创建／唯一字面量替换／按行插入工具；可与任何 shell 或终端接口组合。 |
 | `@deepseek-ai/dsh-tool-fs` | `edit`、`read`、`read_image`、`write` | `ctx.tools`、`ctx.fs`、`ctx.systemPrompt`、`ctx.attachments (read_image registration)`、`ctx.llm + an image-capable route (read_image execution)` | `tool/call`、`fs/write-intent or fs/edit-intent for mutations`、`fs/observed after read presence/absence or successful file operation`、`durable attachment (read_image)`、`tool/result` | - | 先读后写／编辑策略由 `@deepseek-ai/dsh-fs-observation-policy` 添加；它是一个 `fs/*` 事件门禁插件，不会改变 schema。加载这些工具的部署按预期也应加载该插件。没有 `ctx.attachments` 时 `read_image` 不会注册；其 schema 与路由无关，执行时除非确切路由的模型声明图像输入，否则拒绝。 |
 | `@deepseek-ai/dsh-tool-fs-search` | `glob`、`grep` | `ctx.tools`、`ctx.subprocess`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | glob 和 grep 是无条件可用的发现工具，通过 ctx.subprocess spawn 随包提供的 ripgrep 二进制文件（`@vscode/ripgrep`），并作为普通前台调用运行，绝不作为后台任务；无需在宿主机安装 `rg`，也不经过 shell 层。本目录使用 `sampleOverCapGlobResults: true`；部署必须显式选择该行为。结果超过上限时，会通过可选的 ctx.spillStore 后端保存完整的格式化列表；在共置部署中，如果后端公开本地路径，返回的定位信息可供后续读取／搜索。 |
+| `@deepseek-ai/dsh-tool-git` | `git_diff`、`git_log`、`git_status` | `ctx.tools`、`ctx.git` | `tool/call`、`tool/result` | - | 基于 git seam 的只读变更追踪工具：git CLI（git-local 的 gitPath）在包含会话工作目录的仓库中运行。 |
 | `@deepseek-ai/dsh-tool-terminal` | `terminal_close`、`terminal_list`、`terminal_open`、`terminal_read`、`terminal_send`、`terminal_signal` | `ctx.tools`、`ctx.terminals`、`ctx.systemPrompt`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | 这 6 个终端工具需要选择启用，用于补充一次性 bash／文件系统工具。`terminal_send(run_in_background: true)` 会注册到 `ctx.jobs`；schema 不包含 TUI、具名按键序列、BEL、调整尺寸、自动启动和跨 agent 共享。 |
 | `@deepseek-ai/dsh-tool-goal` | `create_goal`、`get_goal`、`update_goal` | `ctx.tools`、`ctx.agents`、`ctx.goals`、`ctx.systemPrompt`、`a calling Agent in an authorized open turn` | `tool/call`、`goal/change for mutations`、`tool/result` | - | create、edit、pause 和 resume 要求直接来自人类的根权限；complete 和 blocked 也接受确切的当前 Goal Round。blocked 的默认下限是 3 个获准的 Round。 |
 | `@deepseek-ai/dsh-schedule` | `schedule_create`、`schedule_delete`、`schedule_list` | `ctx.tools`、`ctx.sessions`、Session 持久化、未来创建的 live 根 Agent | `tool/call`、`schedule/change create or delete`、`tool/result` | - | 仅在选择启用的 Schedule 插件加载后创建的 live 根 Agent scope 内注册。版本 1 接受 after_seconds、显式绝对 at 和有界固定速率 every_seconds，并披露 session-local 交付；管理读取与变更必须通过共享的 Session 持久化 barrier。 |
@@ -776,6 +777,86 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 来源：[`packages/fs/tool-fs-search/src/index.ts`](../packages/fs/tool-fs-search/src/index.ts)
 
 glob 和 grep 是无条件可用的发现工具，通过 ctx.subprocess spawn 随包提供的 ripgrep 二进制文件（`@vscode/ripgrep`），并作为普通前台调用运行，绝不作为后台任务；无需在宿主机安装 `rg`，也不经过 shell 层。本目录使用 `sampleOverCapGlobResults: true`；部署必须显式选择该行为。结果超过上限时，会通过可选的 ctx.spillStore 后端保存完整的格式化列表；在共置部署中，如果后端公开本地路径，返回的定位信息可供后续读取／搜索。
+
+<a id="deepseek-aidsh-tool-git"></a>
+
+## `@deepseek-ai/dsh-tool-git`
+
+### `git_diff`
+
+显示包含工作目录的 git 仓库中每个文件的 diff：默认显示未暂存的 worktree diff，staged=true 时显示已暂存的 diff，或通过 base 和 head 显示修订范围内的 diff。每个文件都携带完整的修改前／修改后内容。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Optional repo path (file or directory) to restrict the diff to."
+    },
+    "staged": {
+      "type": "boolean",
+      "description": "Diff the staged changes (HEAD vs index) instead of the unstaged worktree changes."
+    },
+    "base": {
+      "type": "string",
+      "description": "Start revision of the range to diff; requires head."
+    },
+    "head": {
+      "type": "string",
+      "description": "End revision of the range to diff; requires base."
+    },
+    "unified": {
+      "type": "number",
+      "description": "Unified context lines rendered around each hunk; defaults to the configured context and is capped by it."
+    }
+  }
+}
+```
+
+来源：[`packages/git/tool-git/src/git-diff.ts`](../packages/git/tool-git/src/git-diff.ts)
+
+### `git_log`
+
+按从新到旧的顺序列出包含工作目录的 git 仓库中的近期提交。用于回顾随时间发生的变化，并找出 diff 范围应比较的修订。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "count": {
+      "type": "number",
+      "description": "Maximum number of commits to return; defaults to 20 and is capped by the configured maximum."
+    },
+    "path": {
+      "type": "string",
+      "description": "Optional repo path (file or directory) to restrict the history to."
+    }
+  }
+}
+```
+
+来源：[`packages/git/tool-git/src/git-log.ts`](../packages/git/tool-git/src/git-log.ts)
+
+### `git_status`
+
+列出包含工作目录的 git 仓库中已变更的文件，并附带暂存状态、分支和领先／落后计数。用于在查看 diff 之前跟踪变更。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Optional repo path (file or directory) to restrict the status to."
+    }
+  }
+}
+```
+
+来源：[`packages/git/tool-git/src/git-status.ts`](../packages/git/tool-git/src/git-status.ts)
+
+基于 git seam 的只读变更追踪工具：git CLI（git-local 的 gitPath）在包含会话工作目录的仓库中运行。
 
 <a id="deepseek-aidsh-tool-terminal"></a>
 

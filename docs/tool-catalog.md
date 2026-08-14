@@ -25,6 +25,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-str-replace-editor` | `str_replace_editor` | `ctx.tools`, `ctx.fs` | `tool/call`, `fs/observed after view presence/absence, edit absence, or successful mutation`, `tool/result` | - | Standalone view/create/unique literal replace/line insert tool over the filesystem seam; it composes with any shell or terminal API. |
 | `@deepseek-ai/dsh-tool-fs` | `edit`, `read`, `read_image`, `write` | `ctx.tools`, `ctx.fs`, `ctx.systemPrompt`, `ctx.attachments (read_image registration)`, `ctx.llm + an image-capable route (read_image execution)` | `tool/call`, `fs/write-intent or fs/edit-intent for mutations`, `fs/observed after read presence/absence or successful file operation`, `durable attachment (read_image)`, `tool/result` | - | The read-before-write/edit policy is added by `@deepseek-ai/dsh-fs-observation-policy` (an `fs/*` event-gate plugin, no schema change); a deployment that loads these tools is expected to also load it. `read_image` is not registered without `ctx.attachments`; its schema is route-independent, and execution refuses unless the exact routed model declares image input. |
 | `@deepseek-ai/dsh-tool-fs-search` | `glob`, `grep` | `ctx.tools`, `ctx.subprocess`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | glob and grep are unconditional discovery tools that spawn the packaged ripgrep binary (`@vscode/ripgrep`) through ctx.subprocess as ordinary foreground calls (never background jobs) — no host `rg` install and no shell layer. The catalog uses `sampleOverCapGlobResults: true`; deployments must choose that behavior explicitly. Capped results save the complete formatted list through the optional ctx.spillStore backend; returned locators are follow-up-readable/searchable when the backend exposes local paths in co-located deployments. |
+| `@deepseek-ai/dsh-tool-git` | `git_diff`, `git_log`, `git_status` | `ctx.tools`, `ctx.git` | `tool/call`, `tool/result` | - | Read-only change-tracking tools over the git seam: the git CLI (git-local's gitPath) runs in the repository containing the session working directory. |
 | `@deepseek-ai/dsh-tool-terminal` | `terminal_close`, `terminal_list`, `terminal_open`, `terminal_read`, `terminal_send`, `terminal_signal` | `ctx.tools`, `ctx.terminals`, `ctx.systemPrompt`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The six terminal tools are opt-in and complement one-shot shell/filesystem tools. `terminal_send(run_in_background: true)` registers with `ctx.jobs`; TUI, named key sequences, BEL, resize, auto-start, and cross-agent sharing are absent from the schema. |
 | `@deepseek-ai/dsh-tool-goal` | `create_goal`, `get_goal`, `update_goal` | `ctx.tools`, `ctx.agents`, `ctx.goals`, `ctx.systemPrompt`, `a calling Agent in an authorized open turn` | `tool/call`, `goal/change for mutations`, `tool/result` | - | create, edit, pause, and resume require direct-human root authority; complete and blocked also accept the exact current goal round. The default blocked lower bound is three admitted rounds. |
 | `@deepseek-ai/dsh-schedule` | `schedule_create`, `schedule_delete`, `schedule_list` | `ctx.tools`, `ctx.sessions`, `Session persistence`, `a future live root Agent` | `tool/call`, `schedule/change create or delete`, `tool/result` | - | Registered only inside live root Agent scopes created after the opt-in Schedule plugin loads. Version 1 accepts after_seconds, explicit absolute at, and bounded fixed-rate every_seconds, and discloses session-local delivery; management reads and mutations require the shared Session persistence barrier. |
@@ -772,6 +773,86 @@ Search file contents with a ripgrep regular expression. Returns matching lines w
 Source: [`packages/fs/tool-fs-search/src/index.ts`](../packages/fs/tool-fs-search/src/index.ts)
 
 glob and grep are unconditional discovery tools that spawn the packaged ripgrep binary (`@vscode/ripgrep`) through ctx.subprocess as ordinary foreground calls (never background jobs) — no host `rg` install and no shell layer. The catalog uses `sampleOverCapGlobResults: true`; deployments must choose that behavior explicitly. Capped results save the complete formatted list through the optional ctx.spillStore backend; returned locators are follow-up-readable/searchable when the backend exposes local paths in co-located deployments.
+
+<a id="deepseek-aidsh-tool-git"></a>
+
+## `@deepseek-ai/dsh-tool-git`
+
+### `git_diff`
+
+Show the per-file diff of the git repository containing the working directory: the unstaged worktree diff by default, the staged diff with staged=true, or a revision range with base and head. Each file carries its full before/after content.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Optional repo path (file or directory) to restrict the diff to."
+    },
+    "staged": {
+      "type": "boolean",
+      "description": "Diff the staged changes (HEAD vs index) instead of the unstaged worktree changes."
+    },
+    "base": {
+      "type": "string",
+      "description": "Start revision of the range to diff; requires head."
+    },
+    "head": {
+      "type": "string",
+      "description": "End revision of the range to diff; requires base."
+    },
+    "unified": {
+      "type": "number",
+      "description": "Unified context lines rendered around each hunk; defaults to the configured context and is capped by it."
+    }
+  }
+}
+```
+
+Source: [`packages/git/tool-git/src/git-diff.ts`](../packages/git/tool-git/src/git-diff.ts)
+
+### `git_log`
+
+List recent commits of the git repository containing the working directory, newest first. Use it to review what changed over time and to find the revisions a diff range should compare.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "count": {
+      "type": "number",
+      "description": "Maximum number of commits to return; defaults to 20 and is capped by the configured maximum."
+    },
+    "path": {
+      "type": "string",
+      "description": "Optional repo path (file or directory) to restrict the history to."
+    }
+  }
+}
+```
+
+Source: [`packages/git/tool-git/src/git-log.ts`](../packages/git/tool-git/src/git-log.ts)
+
+### `git_status`
+
+List changed files in the git repository containing the working directory, with staging state, branch, and ahead/behind counts. Use it to track changes before reviewing a diff.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Optional repo path (file or directory) to restrict the status to."
+    }
+  }
+}
+```
+
+Source: [`packages/git/tool-git/src/git-status.ts`](../packages/git/tool-git/src/git-status.ts)
+
+Read-only change-tracking tools over the git seam: the git CLI (git-local's gitPath) runs in the repository containing the session working directory.
 
 <a id="deepseek-aidsh-tool-terminal"></a>
 

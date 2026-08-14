@@ -285,6 +285,7 @@ const subsystemGroups = [
     ['terminal.md', 'PTY 会话', 'PTY sessions'],
     ['jobs.md', '后台任务', 'Background jobs'],
     ['filesystem.md', '文件系统', 'Filesystem'],
+    ['git.md', 'Git', 'Git'],
     ['lsp.md', 'LSP 导航', 'LSP navigation'],
     ['code-runtime.md', '代码运行时', 'Code runtime'],
     ['web.md', 'Web 访问', 'Web access'],
