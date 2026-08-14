@@ -218,6 +218,8 @@ jobs:
           echo "::error::Publishing to a GitHub Release requires running from an app-v* tag (current ref: $GITHUB_REF_NAME)."
           exit 1
 
+      - uses: actions/checkout@v6
+
       - uses: actions/download-artifact@v4
         with:
           pattern: DeepSeek-Harness-*
@@ -228,7 +230,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           # gh discovers the repository from git by default; this job has no
-          # checkout, so name the repository explicitly.
+          # git config, so name the repository explicitly.
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
