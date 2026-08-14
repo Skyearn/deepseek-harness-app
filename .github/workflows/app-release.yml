@@ -3,21 +3,22 @@
 #
 # Build runs without credentials on every pull request and master push so a
 # pull request proves the apps still assemble. Publishing attaches the
-# platform zips to the GitHub Release for the tag: automatically on a dsh-v*
+# platform zips to the GitHub Release for the tag: automatically on an app-v*
 # tag push, or on manual dispatch with publish=true (which must also run from
-# a dsh-v* tag). The bundled builds embed @deepseek-ai/dsh at the exact tagged
-# version, so that version must be published to npm first.
+# an app-v* tag). The bundled builds embed @deepseek-ai/dsh at the version
+# recorded in apps/dsh-version on the tag, so that version must be published
+# to npm first.
 name: App Release
 
 on:
   pull_request:
   push:
     branches: [master]
-    tags: ['dsh-v*']
+    tags: ['app-v*']
   workflow_dispatch:
     inputs:
       publish:
-        description: Attach the built apps to a GitHub Release. Must run from a dsh-v* tag.
+        description: Attach the built apps to a GitHub Release. Must run from an app-v* tag.
         required: true
         type: boolean
         default: false
@@ -49,12 +50,16 @@ jobs:
         id: version
         run: |
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            VERSION="${GITHUB_REF_NAME#dsh-v}"
+            # app-v<appver> tags carry the app shell version; the bundled
+            # @deepseek-ai/dsh is recorded in apps/dsh-version on the tag.
+            VERSION="${GITHUB_REF_NAME#app-v}"
           else
-            VERSION="$(node -p "JSON.parse(require('fs').readFileSync('apps/cli/package.json', 'utf8')).version")"
+            VERSION="$(cat apps/version)"
           fi
+          DSH_VERSION="$(cat apps/dsh-version)"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Derived version: ${VERSION}"
+          echo "dsh-version=${DSH_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Derived app version: ${VERSION} (bundling dsh ${DSH_VERSION})"
 
       - name: Decide bundling
         id: decide
@@ -68,7 +73,7 @@ jobs:
 
       - name: Build the app (universal)
         env:
-          DSH_BUNDLE_VERSION: ${{ steps.version.outputs.version }}
+          DSH_BUNDLE_VERSION: ${{ steps.version.outputs.dsh-version }}
         run: |
           ARGS=(--universal)
           if [[ "${{ steps.decide.outputs.bundle }}" == "true" ]]; then
@@ -123,12 +128,16 @@ jobs:
         shell: bash
         run: |
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            VERSION="${GITHUB_REF_NAME#dsh-v}"
+            # app-v<appver> tags carry the app shell version; the bundled
+            # @deepseek-ai/dsh is recorded in apps/dsh-version on the tag.
+            VERSION="${GITHUB_REF_NAME#app-v}"
           else
-            VERSION="$(node -p "JSON.parse(require('fs').readFileSync('apps/cli/package.json', 'utf8')).version")"
+            VERSION="$(cat apps/version)"
           fi
+          DSH_VERSION="$(cat apps/dsh-version)"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Derived version: ${VERSION}"
+          echo "dsh-version=${DSH_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Derived app version: ${VERSION} (bundling dsh ${DSH_VERSION})"
 
       - name: Decide bundling
         id: decide
@@ -144,7 +153,7 @@ jobs:
       - name: Build the app
         shell: bash
         env:
-          DSH_BUNDLE_VERSION: ${{ steps.version.outputs.version }}
+          DSH_BUNDLE_VERSION: ${{ steps.version.outputs.dsh-version }}
         run: |
           ARGS=()
           if [[ "${{ steps.decide.outputs.bundle }}" == "true" ]]; then
@@ -203,10 +212,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Require a dsh-v* tag for publishing
+      - name: Require an app-v* tag for publishing
         if: github.ref_type != 'tag'
         run: |
-          echo "::error::Publishing to a GitHub Release requires running from a dsh-v* tag (current ref: $GITHUB_REF_NAME)."
+          echo "::error::Publishing to a GitHub Release requires running from an app-v* tag (current ref: $GITHUB_REF_NAME)."
           exit 1
 
       - uses: actions/download-artifact@v4
@@ -224,13 +233,15 @@ jobs:
         run: |
           set -euo pipefail
           TAG="$GITHUB_REF_NAME"
-          VERSION="${TAG#dsh-v}"
+          VERSION="${TAG#app-v}"
+          DSH_VERSION="$(cat apps/dsh-version)"
           if [[ -z "$(ls dist/*.zip 2>/dev/null)" ]]; then
             echo "::error::no platform zip assets found under dist/"
             exit 1
           fi
           NOTES="DeepSeek Harness ${VERSION} for macOS (universal binary: Apple Silicon + Intel) and Windows (x64)."
-          NOTES+=$'\n\n- Each app launches `dsh web` unchanged and releases its port on quit.'
+          NOTES+=$'\n\n- Bundles @deepseek-ai/dsh@'"${DSH_VERSION}"'.'
+          NOTES+=$'\n- Each app launches `dsh web` unchanged and releases its port on quit.'
           NOTES+=$'\n- macOS builds are signed ad-hoc (not notarized): if Gatekeeper objects on first launch, right-click the app and choose Open.'
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/*.zip --clobber

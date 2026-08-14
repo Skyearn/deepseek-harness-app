@@ -47,9 +47,9 @@ powershell -ExecutionPolicy Bypass -File apps/windows/build.ps1 -BundleDsh
 
 ## Release
 
-`.github/workflows/app-release.yml` builds both platform apps on every pull request and master push as a packaging check, and attaches the zips to a GitHub Release when a `dsh-v*` tag is pushed. The version embedded comes from the tag (`dsh-v<version>`), so the npm package `@deepseek-ai/dsh@<version>` must be published before the release build runs.
+`.github/workflows/app-release.yml` builds both platform apps on every pull request and master push as a packaging check, and attaches the zips to a GitHub Release when an `app-v*` tag is pushed. The app shell version comes from the tag (`app-v<version>`, recorded in `apps/version`); the bundled `@deepseek-ai/dsh` version is recorded in `apps/dsh-version` on the tag, so the npm package at that version must be published before the release build runs.
 
-`.github/workflows/upstream-sync.yml` automates the loop on a 6-hour schedule: it merges upstream `deepseek-ai/deepseek-harness` master into this fork's master, asks npm for the current `@deepseek-ai/dsh` version, and when no release exists for it yet tags the merged tree `dsh-v<version>`, which triggers the release build. `sync_only` dispatch merges without touching releases.
+`.github/workflows/upstream-sync.yml` automates the loop on a 6-hour schedule: it merges upstream `deepseek-ai/deepseek-harness` master into this fork's master, asks npm for the current `@deepseek-ai/dsh` version, and when it differs from `apps/dsh-version` bumps the app version (patch +1 in `apps/version`), records the new dsh version, and tags the tree `app-v<version>`, which triggers the release build. Shell-only releases (no dsh change) bump `apps/version` and tag manually. `sync_only` dispatch merges without touching releases.
 
 ## Configuration
 

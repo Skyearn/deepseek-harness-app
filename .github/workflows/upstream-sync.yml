@@ -3,12 +3,13 @@
 #
 # On schedule (or manual dispatch) this workflow merges upstream master into the
 # fork's master and pushes it. It then asks npm for the current @deepseek-ai/dsh
-# version; when the fork has no release for it yet, it tags the merged tree
-# `dsh-v<version>` and pushes the tag, which triggers app-release.yml to build
-# the platform apps and attach them to the GitHub Release for that tag. A tag
+# version; when it differs from the recorded apps/dsh-version, it bumps the app
+# version (apps/version, patch +1), records the new dsh version, and tags the
+# merged tree `app-v<version>`, which triggers app-release.yml to build the
+# platform apps and attach them to the GitHub Release for that tag. A tag
 # that exists without a release (a previous build failure) is recreated at HEAD
 # to re-fire the build. Upstream publishes releases to npm rather than pushing
-# dsh-v* tags, so npm is the release signal.
+# app-v* tags, so npm is the release signal.
 name: Sync upstream and release macOS app
 
 on:
@@ -73,21 +74,38 @@ jobs:
           fi
           git push origin master
 
-      - name: Publish the macOS release for the current dsh version
+      - name: Publish the app release for the current dsh version
         if: ${{ !inputs.sync_only }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          VERSION="$(npm view @deepseek-ai/dsh version)"
-          TAG="dsh-v${VERSION}"
-          SHA="$(git rev-parse HEAD)"
-          echo "current @deepseek-ai/dsh version: ${VERSION}"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release ${TAG} already exists; nothing to publish."
+          DSH_VERSION="$(npm view @deepseek-ai/dsh version)"
+          BUNDLED="$(cat apps/dsh-version)"
+          echo "current @deepseek-ai/dsh version: ${DSH_VERSION} (last bundled: ${BUNDLED})"
+          if [[ "${DSH_VERSION}" == "${BUNDLED}" ]]; then
+            echo "dsh unchanged; nothing to publish."
             exit 0
           fi
+          # The app shell version is independent of the bundled dsh: apps/version
+          # is bumped by one patch whenever the bundled dsh changes (this step),
+          # or manually for shell-only releases.
+          APP_VERSION="$(cat apps/version)"
+          NEW_VERSION="$(node -e "
+            const [maj, min, patch] = '${APP_VERSION}'.split('.').map(Number);
+            console.log([maj, min, patch + 1].join('.'));
+          ")"
+          echo "bumping app version ${APP_VERSION} -> ${NEW_VERSION}"
+          echo "${NEW_VERSION}" > apps/version
+          echo "${DSH_VERSION}" > apps/dsh-version
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/version apps/dsh-version
+          git commit -m "chore(release): bump app version to ${NEW_VERSION} (bundles dsh ${DSH_VERSION})"
+          git push origin master
+          TAG="app-v${NEW_VERSION}"
+          SHA="$(git rev-parse HEAD)"
           # Creating a tag ref via the API fires the same tag push event as a
           # git push; a tag that exists without a release (a previous build
           # failure) is deleted first so the event fires again.
@@ -98,4 +116,4 @@ jobs:
           gh api --method POST "repos/${GH_REPO}/git/refs" \
             -f "ref=refs/tags/${TAG}" \
             -f "sha=${SHA}"
-          echo "Tag ${TAG} created at ${SHA}; macos-app-release.yml is building the release."
+          echo "Tag ${TAG} created at ${SHA}; app-release.yml is building the release."

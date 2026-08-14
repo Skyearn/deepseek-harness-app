@@ -47,9 +47,9 @@ powershell -ExecutionPolicy Bypass -File apps/windows/build.ps1 -BundleDsh
 
 ## 发布
 
-`.github/workflows/app-release.yml` 在每次 pull request 与 master 推送时构建两个平台的应用作为打包检查；推送 `dsh-v*` 标签时，将 zip 附件上传到对应 GitHub Release。内嵌版本取自标签（`dsh-v<version>`），因此发布构建前必须已发布 npm 包 `@deepseek-ai/dsh@<version>`。
+`.github/workflows/app-release.yml` 在每次 pull request 与 master 推送时构建两个平台的应用作为打包检查；推送 `app-v*` 标签时，将 zip 附件上传到对应 GitHub Release。应用壳层版本取自标签（`app-v<version>`，记录于 `apps/version`）；捆绑的 `@deepseek-ai/dsh` 版本记录于标签上的 `apps/dsh-version`，因此该版本的 npm 包必须先发布。
 
-`.github/workflows/upstream-sync.yml` 按 6 小时计划自动完成整个循环：将上游 `deepseek-ai/deepseek-harness` 的 master 合并进本 fork 的 master，向 npm 查询当前 `@deepseek-ai/dsh` 版本；当该版本尚无对应 Release 时，将合并后的树打上 `dsh-v<version>` 标签，从而触发发布构建。`sync_only` 手动触发只合并、不动 Release。
+`.github/workflows/upstream-sync.yml` 按 6 小时计划自动完成整个循环：将上游 `deepseek-ai/deepseek-harness` 的 master 合并进本 fork 的 master，向 npm 查询当前 `@deepseek-ai/dsh` 版本；当它与 `apps/dsh-version` 不同时，把 `apps/version` 的 patch 号 +1、记录新 dsh 版本，并给代码树打上 `app-v<version>` 标签，从而触发发布构建。仅壳层改动（dsh 未变）时手动 bump `apps/version` 并打标签。`sync_only` 手动触发只合并、不动 Release。
 
 ## 配置
 
