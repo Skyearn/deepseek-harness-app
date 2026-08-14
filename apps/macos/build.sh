@@ -77,7 +77,9 @@ cp "${SCRIPT_DIR}/Resources/Info.plist" "${APP_DIR}/Contents/Info.plist"
 
 # --- App icon -------------------------------------------------------------------
 # Resources/AppIcon.icns is committed; regenerate it (rsvg-convert + iconutil)
-# only when it is missing.
+# only when it is missing. The committed icon centers the white mark at 70%
+# inside the #0d1526 rounded square (mirrors the DeepSeek app icon layout);
+# keep the fallback template in sync.
 if [[ -f "${SCRIPT_DIR}/Resources/AppIcon.icns" ]]; then
   echo "==> Using committed AppIcon.icns"
   cp "${SCRIPT_DIR}/Resources/AppIcon.icns" "${RES_DIR}/AppIcon.icns"
@@ -85,10 +87,14 @@ elif command -v rsvg-convert >/dev/null 2>&1 && command -v iconutil >/dev/null 2
   echo "==> Generating AppIcon.icns"
   mkdir -p "${WORK}/AppIcon.iconset"
   path_data="$(sed -n 's/.* d="\([^"]*\)".*/\1/p' "${REPO_ROOT}/apps/web/public/favicon.svg")"
+  # The mark's source bbox is x[0.53,49.37] y[6.94,43.58] (center 24.95,25.26);
+  # scale 0.70 about that center lands it at ~67% width with ~17/25% margins.
   cat > "${WORK}/app-icon.svg" <<EOF
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 50 50">
   <rect width="50" height="50" rx="11" fill="#0d1526"/>
-  <path fill="#ffffff" d="${path_data}"/>
+  <g transform="translate(25 25) scale(0.70) translate(-24.95 -25.26)">
+    <path fill="#ffffff" d="${path_data}"/>
+  </g>
 </svg>
 EOF
   rsvg-convert -w 1024 -h 1024 -o "${WORK}/icon-1024.png" "${WORK}/app-icon.svg"

@@ -160,6 +160,7 @@ jobs:
           test -f "apps/windows/build/Microsoft.Web.WebView2.Core.dll"
           test -f "apps/windows/build/Microsoft.Web.WebView2.WinForms.dll"
           test -f "apps/windows/build/WebView2Loader.dll"
+          test -f "apps/windows/Resources/app.ico"
           if [[ "${{ steps.decide.outputs.bundle }}" == "true" ]]; then
             test -f "apps/windows/build/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js"
             test -f "apps/windows/build/node/node.exe"

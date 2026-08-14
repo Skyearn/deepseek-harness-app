@@ -52,6 +52,7 @@ if (-not (Test-Path $csc)) { $csc = "$env:WINDIR\Microsoft.NET\Framework\v4.0.30
 if (-not (Test-Path $csc)) { throw "csc.exe not found; .NET Framework 4.x is required" }
 
 & $csc /nologo /target:winexe "/out:$exe" "/win32manifest:$(Join-Path $scriptDir 'app.manifest')" `
+  "/win32icon:$(Join-Path $scriptDir 'Resources\app.ico')" `
   /r:System.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Management.dll `
   "/r:$(Join-Path $outDir 'Microsoft.Web.WebView2.Core.dll')" `
   "/r:$(Join-Path $outDir 'Microsoft.Web.WebView2.WinForms.dll')" `
