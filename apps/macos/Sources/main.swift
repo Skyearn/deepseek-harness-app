@@ -623,6 +623,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         ServerController.shared.resolvePaths()
         ServerController.shared.recoverStaleServer()
         ServerController.shared.start()
+
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -684,6 +685,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "退出 DeepSeek Harness",
                         action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.delegate = self
         appItem.submenu = appMenu
 
         // Edit menu — routes undo/redo/cut/copy/paste/select-all through the
@@ -699,6 +701,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         editMenu.addItem(withTitle: "拷贝", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         editMenu.addItem(withTitle: "粘贴", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editMenu.addItem(withTitle: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenu.delegate = self
         editItem.submenu = editMenu
 
         // Window menu — standard minimize/zoom/close shortcuts.
@@ -712,9 +715,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         windowMenu.addItem(.separator())
         windowMenu.addItem(withTitle: "关闭窗口",
                            action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        windowMenu.delegate = self
         windowItem.submenu = windowMenu
 
         NSApp.mainMenu = mainMenu
+        // AppKit auto-inserts the system Edit-menu extras (AutoFill,
+        // Dictation, Emoji & Symbols) with titles from the OPERATING SYSTEM's
+        // language — English on an English system. Retitle them by selector
+        // so the whole menu bar is Chinese regardless of the OS language.
+        localizeSystemMenuItems()
+    }
+
+    /// Retitle every AppKit-provided menu item with Chinese copy. AppKit
+    /// auto-inserts the system Edit-menu extras (AutoFill, Dictation, Emoji &
+    /// Symbols) with titles from the OPERATING SYSTEM's language — English on
+    /// an English system — so they are retitled in place by action selector
+    /// (and the AutoFill submenu item by its system title); their actions are
+    /// correct. AppKit can also insert duplicates across menu-update passes,
+    /// so equal-action items are deduplicated per menu.
+    private func localizeSystemMenuItems() {
+        if let mainMenu = NSApp.mainMenu {
+            localizeAllMenuItems(mainMenu)
+        }
     }
 
     private func buildWindow() {
@@ -735,7 +757,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // writes); the server owns all durable state.
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
-        let web = WKWebView(frame: .zero, configuration: configuration)
+        let web = ChineseMenuWebView(frame: .zero, configuration: configuration)
         web.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(web)
 
@@ -871,7 +893,99 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 }
 
+// MARK: - Menu localization
+
+/// Chinese titles for AppKit's OS-language menu items, keyed by action.
+/// The actions themselves are correct; only the titles need replacing.
+private let systemMenuActionTitles: [Selector: String] = [
+    Selector(("startDictation:")): "听写",
+    Selector(("orderFrontCharacterPalette:")): "表情与符号",
+    Selector(("toggleFullScreen:")): "进入全屏幕",
+    Selector(("arrangeInFront:")): "前置全部窗口",
+]
+
+/// Chinese titles for system menu items identified by their (English) system
+/// title — the AutoFill entry and its submenu items carry no distinguishing
+/// action, so they are matched by the title the OS language provides.
+private let systemMenuItemTitles: [String: String] = [
+    "AutoFill": "自动填充",
+    "Contact…": "联系人…",
+    "Passwords…": "密码…",
+]
+
+/// Retitle the AppKit-provided items in one menu with Chinese copy and drop
+/// duplicate-action items (AppKit can insert the system extras more than
+/// once across menu-update passes). Idempotent, so it can run both at launch
+/// and right before display.
+func localizeMenuItems(_ menu: NSMenu) {
+    var seen: Set<Selector> = []
+    var duplicates: [NSMenuItem] = []
+    for item in menu.items {
+        if let action = item.action {
+            if let title = systemMenuActionTitles[action] {
+                item.title = title
+            }
+            if seen.contains(action) {
+                duplicates.append(item)
+                continue
+            }
+            seen.insert(action)
+        }
+        if let title = systemMenuItemTitles[item.title] {
+            item.title = title
+        }
+        if let submenu = item.submenu {
+            for sub in submenu.items {
+                if let title = systemMenuItemTitles[sub.title] {
+                    sub.title = title
+                }
+            }
+        }
+    }
+    for duplicate in duplicates {
+        menu.removeItem(duplicate)
+    }
+}
+
+/// Retitles every menu in the bar by recursion over the submenus.
+func localizeAllMenuItems(_ menu: NSMenu) {
+    localizeMenuItems(menu)
+    for item in menu.items {
+        if let submenu = item.submenu {
+            localizeAllMenuItems(submenu)
+        }
+    }
+}
+
 // MARK: - Entry
+
+/// A WKWebView whose right-click menu is the Chinese text-editing menu.
+/// macOS shows the system editing menu (English on an English OS) for web
+/// content by default; overriding `menu(for:)` replaces it. Items route
+/// through the responder chain so the web view's field editor handles them.
+/// Retitles a menu right before AppKit displays it, so the system Edit-menu
+/// extras inserted after launch still arrive in Chinese.
+extension AppDelegate: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        localizeMenuItems(menu)
+    }
+}
+
+final class ChineseMenuWebView: WKWebView {
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.addItem(withTitle: "撤销", action: Selector(("undo:")), keyEquivalent: "")
+        menu.addItem(withTitle: "重做", action: Selector(("redo:")), keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "剪切", action: #selector(NSText.cut(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "拷贝", action: #selector(NSText.copy(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "粘贴", action: #selector(NSText.paste(_:)), keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "")
+        return menu
+    }
+}
 
 // Headless diagnostics for packaging and troubleshooting; prints the resolved
 // executables and port state, then exits without starting anything.
