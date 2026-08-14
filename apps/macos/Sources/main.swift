@@ -898,6 +898,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 /// Chinese titles for AppKit's OS-language menu items, keyed by action.
 /// The actions themselves are correct; only the titles need replacing.
 private let systemMenuActionTitles: [Selector: String] = [
+    // AppKit normalizes the standard Edit items to the OS language — the
+    // titles we set at build time are overwritten with Undo/Redo/… on an
+    // English system, so they are restored by selector at display time.
+    Selector(("undo:")): "撤销",
+    Selector(("redo:")): "重做",
+    Selector(("cut:")): "剪切",
+    Selector(("copy:")): "拷贝",
+    Selector(("paste:")): "粘贴",
+    Selector(("selectAll:")): "全选",
     Selector(("startDictation:")): "听写",
     Selector(("orderFrontCharacterPalette:")): "表情与符号",
     Selector(("toggleFullScreen:")): "进入全屏幕",
@@ -925,11 +934,17 @@ func localizeMenuItems(_ menu: NSMenu) {
             if let title = systemMenuActionTitles[action] {
                 item.title = title
             }
-            if seen.contains(action) {
-                duplicates.append(item)
-                continue
+            // Top-level menu items all carry the standard `submenuAction:`
+            // (a submenu is assigned), so that action is excluded from
+            // deduplication; only the auto-inserted extras (Dictation, Emoji)
+            // can legitimately repeat.
+            if action != Selector(("submenuAction:")) {
+                if seen.contains(action) {
+                    duplicates.append(item)
+                    continue
+                }
+                seen.insert(action)
             }
-            seen.insert(action)
         }
         if let title = systemMenuItemTitles[item.title] {
             item.title = title
