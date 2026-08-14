@@ -86,6 +86,7 @@ jobs:
           lipo -info "$APP/Contents/MacOS/DeepSeek Harness" | grep -q "arm64"
           if [[ "${{ steps.decide.outputs.bundle }}" == "true" ]]; then
             test -x "$APP/Contents/Resources/dsh/node_modules/.bin/dsh"
+            test -x "$APP/Contents/Resources/dsh/bin/node"
           fi
           "$APP/Contents/MacOS/DeepSeek Harness" --resolve
 
@@ -161,6 +162,7 @@ jobs:
           test -f "apps/windows/build/WebView2Loader.dll"
           if [[ "${{ steps.decide.outputs.bundle }}" == "true" ]]; then
             test -f "apps/windows/build/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js"
+            test -f "apps/windows/build/node/node.exe"
             "$EXE" --resolve
           fi
 
@@ -178,6 +180,9 @@ jobs:
           ITEMS=("'DeepSeek Harness.exe'" "'Microsoft.Web.WebView2.Core.dll'" "'Microsoft.Web.WebView2.WinForms.dll'" "'WebView2Loader.dll'")
           if [[ -d dsh ]]; then
             ITEMS+=("'dsh'")
+          fi
+          if [[ -d node ]]; then
+            ITEMS+=("'node'")
           fi
           LIST=$(IFS=,; echo "${ITEMS[*]}")
           powershell -Command "Compress-Archive -Path $LIST -DestinationPath 'DeepSeek-Harness-${VERSION}-windows-x64.zip' -Force"

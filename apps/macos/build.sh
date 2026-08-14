@@ -108,6 +108,21 @@ fi
 if [[ "${BUNDLE_DSH}" -eq 1 ]]; then
   echo "==> Bundling @deepseek-ai/dsh into Resources/dsh"
   npm install --prefix "${RES_DIR}/dsh" "@deepseek-ai/dsh@${DSH_BUNDLE_VERSION:-latest}"
+
+  # Bundle a node runtime (arm64 + x64, lipo-merged) so the app needs no
+  # system node. Only the node binary is kept — npm, corepack, and docs are
+  # never run by `dsh web`. Pinned by NODE_BUNDLE_VERSION (default v24 LTS-line).
+  NODE_BUNDLE_VERSION="${NODE_BUNDLE_VERSION:-v24.12.0}"
+  echo "==> Bundling node ${NODE_BUNDLE_VERSION}"
+  mkdir -p "${RES_DIR}/dsh/bin" "${WORK}/node"
+  for arch in darwin-arm64 darwin-x64; do
+    curl -fsSL "https://nodejs.org/dist/${NODE_BUNDLE_VERSION}/node-${NODE_BUNDLE_VERSION}-${arch}.tar.gz" \
+      -o "${WORK}/node-${arch}.tar.gz"
+    tar -xzf "${WORK}/node-${arch}.tar.gz" -C "${WORK}/node"
+    mv "${WORK}/node/node-${NODE_BUNDLE_VERSION}-${arch}/bin/node" "${WORK}/node-${arch}"
+  done
+  lipo -create "${WORK}/node-darwin-arm64" "${WORK}/node-darwin-x64" -output "${RES_DIR}/dsh/bin/node"
+  chmod +x "${RES_DIR}/dsh/bin/node"
 fi
 
 # --- Codesign (ad-hoc by default; CODESIGN_IDENTITY for release signing) ---------

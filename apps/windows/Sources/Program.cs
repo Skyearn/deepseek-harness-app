@@ -168,6 +168,8 @@ namespace DeepSeekHarness
         public static string FindNode()
         {
             if (Settings.NodePath != null && File.Exists(Settings.NodePath)) return Settings.NodePath;
+            string bundled = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "node", "node.exe");
+            if (File.Exists(bundled)) return bundled;
             foreach (string dir in CandidateDirs())
             {
                 string candidate = Path.Combine(dir, "node.exe");
