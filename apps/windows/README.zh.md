@@ -42,6 +42,7 @@ apps/windows/build.ps1 -BundleDsh -DshVersion 0.1.0-rc.6
 | `dshPath` | `dshPath` / `-dshPath` | 自动 | dsh `lib/bin.js` 的显式路径 |
 | `nodePath` | `nodePath` / `-nodePath` | 自动 | `node.exe` 的显式路径 |
 | `openBrowserOnLaunch` | `openBrowserOnLaunch` / `-openBrowserOnLaunch` | `0` | 服务就绪时是否额外打开系统浏览器（内嵌视图始终显示） |
+| `showStatusBar` | `showStatusBar` / `-showStatusBar` | `1` | 是否在 Web 视图下方显示 36px 状态栏（服务状态 + URL）；右键点击状态栏可切换 |
 | `stateDir` | `stateDir` / `-stateDir` | `%LOCALAPPDATA%\DeepSeek Harness` | 启动器存放 `server.pid`/`app.pid` 锁与 server.log 的位置 |
 
 示例——换一个端口提供服务：

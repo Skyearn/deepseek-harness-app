@@ -597,10 +597,14 @@ final class ServerController {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
+    private var statusBar: NSView!
+    private var webBottomConstraint: NSLayoutConstraint!
     private var statusLabel: NSTextField!
     private var urlField: NSTextField!
     private var signalSources: [DispatchSourceSignal] = []
     private var lastFailure: String?
+    private var showStatusBarItem: NSMenuItem?
+    private var appearanceObservation: NSKeyValueObservation?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installSignalHandlers()
@@ -671,6 +675,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         appMenu.addItem(withTitle: "打开浏览器", action: #selector(openBrowser(_:)), keyEquivalent: "b")
         appMenu.addItem(withTitle: "重启服务", action: #selector(restartServer(_:)), keyEquivalent: "r")
         appMenu.addItem(withTitle: "打开日志", action: #selector(openLogs(_:)), keyEquivalent: "l")
+        appMenu.addItem(.separator())
+        let showStatusBar = NSMenuItem(title: "显示状态栏",
+                                       action: #selector(toggleStatusBar(_:)), keyEquivalent: "")
+        showStatusBar.target = self
+        appMenu.addItem(showStatusBar)
+        showStatusBarItem = showStatusBar
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "隐藏 DeepSeek Harness",
                         action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
@@ -756,11 +766,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         urlField.translatesAutoresizingMaskIntoConstraints = false
         bar.addSubview(urlField)
 
+        let webBottom = web.bottomAnchor.constraint(equalTo: bar.topAnchor)
+
         NSLayoutConstraint.activate([
             web.topAnchor.constraint(equalTo: content.topAnchor),
             web.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             web.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            web.bottomAnchor.constraint(equalTo: bar.topAnchor),
+            webBottom,
             bar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             bar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             bar.bottomAnchor.constraint(equalTo: content.bottomAnchor),
@@ -772,7 +784,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         ])
 
         self.webView = web
+        self.statusBar = bar
+        self.webBottomConstraint = webBottom
         self.window = window
+        // The status bar's background is a static color snapshot; repaint it
+        // when the system appearance flips so it follows the current theme.
+        appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) {
+            [weak self] _, _ in self?.repaintStatusBar()
+        }
+        applyStatusBarVisibility(animated: false)
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -868,6 +888,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func openLogs(_ sender: Any?) {
         Paths.ensure(Paths.logs)
         NSWorkspace.shared.open(Paths.logs)
+    }
+
+    // MARK: Status bar
+
+    private static let showStatusBarKey = "showStatusBar"
+
+    /// The persisted status-bar visibility; the menu checkbox mirrors it.
+    private var statusBarVisible: Bool {
+        get { UserDefaults.standard.object(forKey: Self.showStatusBarKey) == nil
+            || UserDefaults.standard.bool(forKey: Self.showStatusBarKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.showStatusBarKey) }
+    }
+
+    @objc private func toggleStatusBar(_ sender: Any?) {
+        statusBarVisible.toggle()
+        applyStatusBarVisibility(animated: true)
+    }
+
+    /// Show or hide the status bar and repaint it for the current appearance.
+    private func applyStatusBarVisibility(animated: Bool) {
+        guard let statusBar else { return }
+        let visible = statusBarVisible
+        showStatusBarItem?.state = visible ? .on : .off
+        // The web view anchors to the bar when visible, to the window edge
+        // when hidden; swap the constraint so the web fills the released space.
+        webBottomConstraint.isActive = false
+        let newBottom = visible
+            ? statusBar.topAnchor
+            : statusBar.superview?.bottomAnchor
+        if let newBottom {
+            webBottomConstraint = webView.bottomAnchor.constraint(equalTo: newBottom)
+            webBottomConstraint.isActive = true
+        }
+        statusBar.isHidden = !visible
+        if animated {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.2
+                statusBar.superview?.layoutSubtreeIfNeeded()
+            }
+        }
+        repaintStatusBar()
+    }
+
+    /// The bar's background is a static color snapshot taken at build time;
+    /// refresh it when the system appearance changes so the bar follows the
+    /// active theme instead of staying in the launch-time one.
+    private func repaintStatusBar() {
+        statusBar?.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
     }
 }
 

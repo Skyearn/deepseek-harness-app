@@ -39,6 +39,7 @@ namespace DeepSeekHarness
         public static int Port = 3080;
         public static bool OpenBrowserOnLaunch = false;
         public static bool SingleInstance = true;
+        public static bool ShowStatusBar = true;
         public static string DshPath;  // explicit path to dsh lib/bin.js
         public static string NodePath; // explicit path to node.exe
         public static string StateDir; // lock/log location override (tests)
@@ -57,6 +58,8 @@ namespace DeepSeekHarness
                         if (value is int) OpenBrowserOnLaunch = ((int)value) != 0;
                         value = key.GetValue("singleInstance");
                         if (value is int) SingleInstance = ((int)value) != 0;
+                        value = key.GetValue("showStatusBar");
+                        if (value is int) ShowStatusBar = ((int)value) != 0;
                         DshPath = key.GetValue("dshPath") as string;
                         NodePath = key.GetValue("nodePath") as string;
                         StateDir = key.GetValue("stateDir") as string;
@@ -83,6 +86,10 @@ namespace DeepSeekHarness
                 else if (arg == "-singleInstance" && i + 1 < args.Length)
                 {
                     SingleInstance = args[++i] != "0";
+                }
+                else if (arg == "-showStatusBar" && i + 1 < args.Length)
+                {
+                    ShowStatusBar = args[++i] != "0";
                 }
                 else if (arg == "-dshPath" && i + 1 < args.Length)
                 {
@@ -494,6 +501,7 @@ namespace DeepSeekHarness
     {
         private readonly Server server = new Server();
         private WebView2 web;
+        private Panel statusBar;
         private System.Windows.Forms.Timer lifeTimer;
         private Label statusLabel;
         private Label urlLabel;
@@ -585,9 +593,40 @@ namespace DeepSeekHarness
             buttons.Controls.Add(logsButton);
             buttons.Controls.Add(quitButton);
             bar.Controls.Add(buttons);
+            statusBar = bar;
+            bar.Visible = Settings.ShowStatusBar;
+
+            // Right-clicking the status bar toggles it; the choice persists
+            // to the registry so the next launch starts the way it ended.
+            ContextMenuStrip barMenu = new ContextMenuStrip();
+            ToolStripMenuItem toggleBar = new ToolStripMenuItem("显示状态栏");
+            toggleBar.Checked = Settings.ShowStatusBar;
+            toggleBar.Click += delegate
+            {
+                Settings.ShowStatusBar = !Settings.ShowStatusBar;
+                statusBar.Visible = Settings.ShowStatusBar;
+                toggleBar.Checked = Settings.ShowStatusBar;
+                SaveShowStatusBar(Settings.ShowStatusBar);
+            };
+            barMenu.Items.Add(toggleBar);
+            bar.ContextMenuStrip = barMenu;
 
             Controls.Add(web);
             Controls.Add(bar);
+        }
+
+        private static void SaveShowStatusBar(bool visible)
+        {
+            try
+            {
+                using (RegistryKey key = Registry.CurrentUser.CreateSubKey(Settings.RegistryKey))
+                {
+                    key.SetValue("showStatusBar", visible ? 1 : 0, RegistryValueKind.DWord);
+                }
+            }
+            catch (Exception)
+            {
+            }
         }
 
         protected override void OnLoad(EventArgs e)
