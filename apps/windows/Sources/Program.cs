@@ -598,14 +598,16 @@ namespace DeepSeekHarness
 
             // Right-clicking the status bar toggles it; the choice persists
             // to the registry so the next launch starts the way it ended.
+            // The menu item's text names the action the click performs, so it
+            // reads "隐藏状态栏" while visible and "显示状态栏" while hidden.
             ContextMenuStrip barMenu = new ContextMenuStrip();
-            ToolStripMenuItem toggleBar = new ToolStripMenuItem("显示状态栏");
-            toggleBar.Checked = Settings.ShowStatusBar;
+            ToolStripMenuItem toggleBar = new ToolStripMenuItem("");
+            UpdateStatusBarMenuItem(toggleBar, Settings.ShowStatusBar);
             toggleBar.Click += delegate
             {
                 Settings.ShowStatusBar = !Settings.ShowStatusBar;
                 statusBar.Visible = Settings.ShowStatusBar;
-                toggleBar.Checked = Settings.ShowStatusBar;
+                UpdateStatusBarMenuItem(toggleBar, Settings.ShowStatusBar);
                 SaveShowStatusBar(Settings.ShowStatusBar);
             };
             barMenu.Items.Add(toggleBar);
@@ -613,6 +615,11 @@ namespace DeepSeekHarness
 
             Controls.Add(web);
             Controls.Add(bar);
+        }
+
+        private static void UpdateStatusBarMenuItem(ToolStripMenuItem item, bool visible)
+        {
+            item.Text = visible ? "隐藏状态栏" : "显示状态栏";
         }
 
         private static void SaveShowStatusBar(bool visible)

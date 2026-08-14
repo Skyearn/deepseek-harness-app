@@ -47,7 +47,7 @@ Preferences live in the `ai.deepseek.harness` domain (`defaults write ai.deepsee
 | `dshPath` | auto | Explicit path to the dsh executable (or its `lib/bin.js`) |
 | `nodePath` | auto | Explicit path to the node executable |
 | `openBrowserOnLaunch` | `NO` | Additionally open the system browser when the server is ready (the embedded view always shows) |
-| `showStatusBar` | `YES` | Show the 30px status bar (server state + URL) under the web view; toggled from the app menu's "显示状态栏" item |
+| `showStatusBar` | `YES` | Show the 30px status bar (server state + URL) under the web view; the app menu's status-bar item (显示/隐藏状态栏) toggles it |
 | `stateDir` | `~/Library/Application Support/DeepSeek Harness` | Where the shell keeps its `server.pid`/`app.pid` lock files |
 
 Example — serve on a different port:

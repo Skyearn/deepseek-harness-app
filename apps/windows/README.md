@@ -42,7 +42,7 @@ Registry values under `HKCU\Software\DeepSeek Harness` (mirror of the macOS `def
 | `dshPath` | `dshPath` / `-dshPath` | auto | Explicit path to the dsh `lib/bin.js` |
 | `nodePath` | `nodePath` / `-nodePath` | auto | Explicit path to `node.exe` |
 | `openBrowserOnLaunch` | `openBrowserOnLaunch` / `-openBrowserOnLaunch` | `0` | Additionally open the system browser when the server is ready (the embedded view always shows) |
-| `showStatusBar` | `showStatusBar` / `-showStatusBar` | `1` | Show the 36px status bar (server state + URL) under the web view; toggled by right-clicking the bar |
+| `showStatusBar` | `showStatusBar` / `-showStatusBar` | `1` | Show the 36px status bar (server state + URL) under the web view; right-clicking the bar toggles it via a 显示/隐藏状态栏 item |
 | `stateDir` | `stateDir` / `-stateDir` | `%LOCALAPPDATA%\DeepSeek Harness` | Where the launcher keeps its `server.pid`/`app.pid` locks and the server log |
 
 Example — serve on a different port:

@@ -676,11 +676,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         appMenu.addItem(withTitle: "重启服务", action: #selector(restartServer(_:)), keyEquivalent: "r")
         appMenu.addItem(withTitle: "打开日志", action: #selector(openLogs(_:)), keyEquivalent: "l")
         appMenu.addItem(.separator())
-        let showStatusBar = NSMenuItem(title: "显示状态栏",
-                                       action: #selector(toggleStatusBar(_:)), keyEquivalent: "")
-        showStatusBar.target = self
-        appMenu.addItem(showStatusBar)
-        showStatusBarItem = showStatusBar
+        let toggleStatusBar = NSMenuItem(title: "",
+                                         action: #selector(toggleStatusBar(_:)), keyEquivalent: "")
+        toggleStatusBar.target = self
+        appMenu.addItem(toggleStatusBar)
+        showStatusBarItem = toggleStatusBar
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "隐藏 DeepSeek Harness",
                         action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
@@ -910,7 +910,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func applyStatusBarVisibility(animated: Bool) {
         guard let statusBar else { return }
         let visible = statusBarVisible
-        showStatusBarItem?.state = visible ? .on : .off
+        // The menu item's title follows the state: it names the action that
+        // the click performs, so it reads "隐藏状态栏" while visible and
+        // "显示状态栏" while hidden.
+        showStatusBarItem?.title = visible ? "隐藏状态栏" : "显示状态栏"
         // The web view anchors to the bar when visible, to the window edge
         // when hidden; swap the constraint so the web fills the released space.
         webBottomConstraint.isActive = false

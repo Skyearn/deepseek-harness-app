@@ -47,7 +47,7 @@ apps/macos/build.sh --output-dir /tmp  # place the .app elsewhere
 | `dshPath` | 自动 | dsh 可执行文件（或其 `lib/bin.js`）的显式路径 |
 | `nodePath` | 自动 | node 可执行文件的显式路径 |
 | `openBrowserOnLaunch` | `NO` | 服务就绪时是否额外打开系统浏览器（内嵌视图始终显示） |
-| `showStatusBar` | `YES` | 是否在 Web 视图下方显示 30px 状态栏（服务状态 + URL）；可在应用菜单的「显示状态栏」项切换 |
+| `showStatusBar` | `YES` | 是否在 Web 视图下方显示 30px 状态栏（服务状态 + URL）；应用菜单的状态栏项（显示/隐藏状态栏）可切换 |
 | `stateDir` | `~/Library/Application Support/DeepSeek Harness` | 壳存放 `server.pid`/`app.pid` 锁文件的位置 |
 
 示例——换一个端口提供服务：
