@@ -242,14 +242,14 @@ namespace DeepSeekHarness
         {
             if (DshPath.Length == 0 || NodePath.Length == 0)
             {
-                return "Cannot find dsh and/or node. Install them, set the dshPath/nodePath registry values "
-                    + @"(HKCU\Software\DeepSeek Harness), or use --bundle-dsh at build time.";
+                return "找不到 dsh 和/或 node。请安装它们，设置 dshPath/nodePath 注册表值 "
+                    + @"(HKCU\Software\DeepSeek Harness)，或在构建时使用 --bundle-dsh。";
             }
             if (Net.PortOpen(Settings.Port))
             {
-                return "Port " + Settings.Port
-                    + " is already in use by another process. Quit that process, or choose another port "
-                    + "(registry value port or -port <n>).";
+                return "端口 " + Settings.Port
+                    + " 已被其他进程占用。请退出该进程，或选择其他端口 "
+                    + "（注册表值 port 或 -port <n>）。";
             }
             try
             {
@@ -520,9 +520,16 @@ namespace DeepSeekHarness
                 if (!e.IsSuccess)
                 {
                     MessageBox.Show(this,
-                        "The Microsoft Edge WebView2 runtime is missing. Install it from "
-                        + "https://developer.microsoft.com/microsoft-edge/webview2/",
-                        "WebView2 runtime required", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        "缺少 Microsoft Edge WebView2 运行时。请从 "
+                        + "https://developer.microsoft.com/microsoft-edge/webview2/ 安装。",
+                        "需要 WebView2 运行时", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                else
+                {
+                    // Chinese text-editing context menu; the browser default
+                    // (English on an English Windows) is replaced.
+                    web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+                    web.CoreWebView2.ContextMenuRequested += OnContextMenuRequested;
                 }
             };
 
@@ -531,7 +538,7 @@ namespace DeepSeekHarness
             bar.Height = 36;
 
             statusLabel = new Label();
-            statusLabel.Text = "Starting server…";
+            statusLabel.Text = "正在启动服务…";
             statusLabel.AutoSize = true;
             statusLabel.Location = new Point(12, 10);
             bar.Controls.Add(statusLabel);
@@ -550,24 +557,24 @@ namespace DeepSeekHarness
             buttons.Padding = new Padding(0, 5, 8, 0);
 
             openButton = new Button();
-            openButton.Text = "Open in Browser";
+            openButton.Text = "打开浏览器";
             openButton.Width = 120;
             openButton.Enabled = false;
             openButton.Click += delegate { Browser.Open(Settings.Port); };
 
             restartButton = new Button();
-            restartButton.Text = "Restart";
+            restartButton.Text = "重启";
             restartButton.Width = 80;
             restartButton.Enabled = false;
             restartButton.Click += delegate { Restart(); };
 
             Button logsButton = new Button();
-            logsButton.Text = "Open Logs";
+            logsButton.Text = "打开日志";
             logsButton.Width = 90;
             logsButton.Click += delegate { OpenLogs(); };
 
             Button quitButton = new Button();
-            quitButton.Text = "Quit";
+            quitButton.Text = "退出";
             quitButton.Width = 74;
             quitButton.Click += delegate { Close(); };
 
@@ -616,7 +623,7 @@ namespace DeepSeekHarness
             if (!server.ChildAlive())
             {
                 lifeTimer.Stop();
-                Fail("The server stopped (process exited).\n\n" + server.LogTail(30));
+                Fail("服务已停止（进程已退出）。\n\n" + server.LogTail(30));
                 return;
             }
             if (!ready)
@@ -624,7 +631,7 @@ namespace DeepSeekHarness
                 if (Net.PortOpen(Settings.Port))
                 {
                     ready = true;
-                    statusLabel.Text = "Running";
+                    statusLabel.Text = "运行中";
                     urlLabel.Text = "http://127.0.0.1:" + Settings.Port;
                     openButton.Enabled = true;
                     restartButton.Enabled = true;
@@ -634,7 +641,7 @@ namespace DeepSeekHarness
                 else if (DateTime.Now > readyDeadline)
                 {
                     lifeTimer.Stop();
-                    Fail("The server did not start within 90 seconds.\n\n" + server.LogTail(30));
+                    Fail("服务未在 90 秒内启动。\n\n" + server.LogTail(30));
                 }
             }
         }
@@ -676,14 +683,14 @@ namespace DeepSeekHarness
 
         private void Fail(string message)
         {
-            statusLabel.Text = "Stopped";
+            statusLabel.Text = "已停止";
             urlLabel.Text = "";
             openButton.Enabled = false;
             restartButton.Enabled = true;
             if (message == lastFailure) return;
             lastFailure = message;
             DialogResult result = MessageBox.Show(this, message,
-                "DeepSeek Harness could not start the server",
+                "DeepSeek Harness 无法启动服务",
                 MessageBoxButtons.YesNoCancel, MessageBoxIcon.Error);
             if (result == DialogResult.Yes)
             {
@@ -709,6 +716,40 @@ namespace DeepSeekHarness
             catch (Exception)
             {
             }
+        }
+
+        private const string CmdCut = "dsh.cut";
+        private const string CmdCopy = "dsh.copy";
+        private const string CmdPaste = "dsh.paste";
+        private const string CmdSelectAll = "dsh.selectall";
+
+        // Supplies the Chinese text-editing context menu. Selecting a custom
+        // command item re-raises the event with SelectedCommandId set, which
+        // is where the edit command actually runs against the page.
+        private void OnContextMenuRequested(object sender, CoreWebView2ContextMenuRequestedEventArgs e)
+        {
+            if (!string.IsNullOrEmpty(e.SelectedCommandId))
+            {
+                switch (e.SelectedCommandId)
+                {
+                    case CmdCut: _ = web.CoreWebView2.ExecuteScriptAsync("document.execCommand('cut')"); break;
+                    case CmdCopy: _ = web.CoreWebView2.ExecuteScriptAsync("document.execCommand('copy')"); break;
+                    case CmdPaste: _ = web.CoreWebView2.ExecuteScriptAsync("document.execCommand('paste')"); break;
+                    case CmdSelectAll: _ = web.CoreWebView2.ExecuteScriptAsync("document.execCommand('selectAll')"); break;
+                }
+                e.Handled = true;
+                return;
+            }
+            e.MenuItems.Clear();
+            e.MenuItems.Add(web.CoreWebView2.Environment.CreateContextMenuItem(
+                "剪切", null, CoreWebView2ContextMenuItemKind.Command, CmdCut));
+            e.MenuItems.Add(web.CoreWebView2.Environment.CreateContextMenuItem(
+                "拷贝", null, CoreWebView2ContextMenuItemKind.Command, CmdCopy));
+            e.MenuItems.Add(web.CoreWebView2.Environment.CreateContextMenuItem(
+                "粘贴", null, CoreWebView2ContextMenuItemKind.Command, CmdPaste));
+            e.MenuItems.Add(web.CoreWebView2.Environment.CreateContextMenuItem(
+                "全选", null, CoreWebView2ContextMenuItemKind.Command, CmdSelectAll));
+            e.Handled = true;
         }
     }
 
@@ -750,7 +791,7 @@ namespace DeepSeekHarness
                 mutex = new Mutex(true, Settings.BundleId + ".single", out createdNew);
                 if (!createdNew)
                 {
-                    MessageBox.Show("DeepSeek Harness is already running.");
+                    MessageBox.Show("DeepSeek Harness 已在运行。");
                     return;
                 }
             }

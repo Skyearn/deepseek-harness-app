@@ -653,22 +653,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // MARK: UI
 
+    /// Build the full menu bar. The Edit menu is required, not cosmetic: on
+    /// macOS the standard text-editing shortcuts (⌘X/⌘C/⌘V/⌘A/⌘Z) reach the
+    /// WKWebView's field editor only through menu items carrying those key
+    /// equivalents, so without it copy/paste/select-all die inside the embedded
+    /// web UI. All titles are Chinese product copy.
     private func buildMenu() {
         let mainMenu = NSMenu()
+
+        // App menu — the first item shows the app name automatically.
         let appItem = NSMenuItem()
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About DeepSeek Harness",
+        appMenu.addItem(withTitle: "关于 DeepSeek Harness",
                         action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Open in Browser", action: #selector(openBrowser(_:)), keyEquivalent: "b")
-        appMenu.addItem(withTitle: "Restart Server", action: #selector(restartServer(_:)), keyEquivalent: "r")
+        appMenu.addItem(withTitle: "打开浏览器", action: #selector(openBrowser(_:)), keyEquivalent: "b")
+        appMenu.addItem(withTitle: "重启服务", action: #selector(restartServer(_:)), keyEquivalent: "r")
+        appMenu.addItem(withTitle: "打开日志", action: #selector(openLogs(_:)), keyEquivalent: "l")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Open Logs", action: #selector(openLogs(_:)), keyEquivalent: "l")
+        appMenu.addItem(withTitle: "隐藏 DeepSeek Harness",
+                        action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthers = NSMenuItem(title: "隐藏其他",
+                                    action: #selector(NSApplication.hideOtherApplications(_:)),
+                                    keyEquivalent: "h")
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(hideOthers)
+        appMenu.addItem(withTitle: "全部显示",
+                        action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit DeepSeek Harness",
+        appMenu.addItem(withTitle: "退出 DeepSeek Harness",
                         action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
+
+        // Edit menu — routes undo/redo/cut/copy/paste/select-all through the
+        // responder chain (nil target) so the web view's field editor receives
+        // them; this is what makes ⌘Z/⇧⌘Z/⌘X/⌘C/⌘V/⌘A work in the embedded UI.
+        let editItem = NSMenuItem()
+        mainMenu.addItem(editItem)
+        let editMenu = NSMenu(title: "编辑")
+        editMenu.addItem(withTitle: "撤销", action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: "重做", action: Selector(("redo:")), keyEquivalent: "Z")
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "剪切", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "拷贝", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "粘贴", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editItem.submenu = editMenu
+
+        // Window menu — standard minimize/zoom/close shortcuts.
+        let windowItem = NSMenuItem()
+        mainMenu.addItem(windowItem)
+        let windowMenu = NSMenu(title: "窗口")
+        windowMenu.addItem(withTitle: "最小化",
+                           action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "缩放",
+                           action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(withTitle: "关闭窗口",
+                           action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        windowItem.submenu = windowMenu
+
         NSApp.mainMenu = mainMenu
     }
 
@@ -700,7 +745,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         bar.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         content.addSubview(bar)
 
-        statusLabel = NSTextField(labelWithString: "Starting server…")
+        statusLabel = NSTextField(labelWithString: "正在启动服务…")
         statusLabel.font = .systemFont(ofSize: 12)
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         bar.addSubview(statusLabel)
@@ -736,16 +781,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard let statusLabel, let urlField else { return }
         switch ServerController.shared.state {
         case .stopped, .starting:
-            statusLabel.stringValue = "Starting server…"
+            statusLabel.stringValue = "正在启动服务…"
             urlField.stringValue = ServerController.shared.url.absoluteString
         case .running:
-            statusLabel.stringValue = "Running"
+            statusLabel.stringValue = "运行中"
             urlField.stringValue = ServerController.shared.url.absoluteString
             loadWebView()
         case .stopping:
-            statusLabel.stringValue = "Stopping…"
+            statusLabel.stringValue = "正在停止…"
         case .failed(let message):
-            statusLabel.stringValue = "Stopped"
+            statusLabel.stringValue = "已停止"
             urlField.stringValue = ""
             showStoppedPage(message)
             if message != lastFailure {
@@ -775,7 +820,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         h2 { margin-bottom: 8px; }
         pre { white-space: pre-wrap; font-size: 12px; }
         </style></head>
-        <body><h2>Server stopped</h2><pre>\(escaped)</pre></body></html>
+        <body><h2>服务已停止</h2><pre>\(escaped)</pre></body></html>
         """
         webView.loadHTMLString(html, baseURL: nil)
     }
@@ -786,12 +831,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func showFailureAlert(_ message: String) {
         let alert = NSAlert()
-        alert.messageText = "DeepSeek Harness could not start the server"
+        alert.messageText = "DeepSeek Harness 无法启动服务"
         alert.informativeText = message
         alert.alertStyle = .critical
-        alert.addButton(withTitle: "Restart")
-        alert.addButton(withTitle: "Open Logs")
-        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: "重启")
+        alert.addButton(withTitle: "打开日志")
+        alert.addButton(withTitle: "退出")
         switch alert.runModal() {
         case .alertFirstButtonReturn:
             ServerController.shared.restart()
