@@ -592,6 +592,35 @@ final class ServerController {
     }
 }
 
+// MARK: - Status bar
+
+/// The bottom status bar: layer-backed so it composites correctly beside the
+/// WKWebView, with its background set from the dynamic `windowBackgroundColor`
+/// in `updateLayer()`. AppKit calls `updateLayer()` on every display refresh —
+/// including when the system theme flips. `windowBackgroundColor` is dynamic,
+/// and `cgColor` resolves it against the current drawing appearance, so the
+/// read is scoped to the view's effective appearance; without that scope it
+/// falls back to the light variant.
+final class StatusBarView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        wantsLayer = true
+    }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        }
+    }
+}
+
 // MARK: - App delegate
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
@@ -604,7 +633,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var signalSources: [DispatchSourceSignal] = []
     private var lastFailure: String?
     private var showStatusBarItem: NSMenuItem?
-    private var appearanceObservation: NSKeyValueObservation?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installSignalHandlers()
@@ -749,10 +777,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         web.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(web)
 
-        let bar = NSView()
+        let bar = StatusBarView()
         bar.translatesAutoresizingMaskIntoConstraints = false
-        bar.wantsLayer = true
-        bar.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         content.addSubview(bar)
 
         statusLabel = NSTextField(labelWithString: "正在启动服务…")
@@ -787,11 +813,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         self.statusBar = bar
         self.webBottomConstraint = webBottom
         self.window = window
-        // The status bar's background is a static color snapshot; repaint it
-        // when the system appearance flips so it follows the current theme.
-        appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) {
-            [weak self] _, _ in self?.repaintStatusBar()
-        }
         applyStatusBarVisibility(animated: false)
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -931,14 +952,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 statusBar.superview?.layoutSubtreeIfNeeded()
             }
         }
-        repaintStatusBar()
-    }
-
-    /// The bar's background is a static color snapshot taken at build time;
-    /// refresh it when the system appearance changes so the bar follows the
-    /// active theme instead of staying in the launch-time one.
-    private func repaintStatusBar() {
-        statusBar?.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
     }
 }
 
