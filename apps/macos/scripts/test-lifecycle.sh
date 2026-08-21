@@ -96,6 +96,12 @@ APP_PID=""
 wait_for "$TEST_PORT" closed 30 || fail "phase 1: port still open after app exit"
 pass "phase 1: port released after quit"
 
+for _ in $(seq 1 50); do
+  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+    break
+  fi
+  sleep 0.1
+done
 if kill -0 "$SERVER_PID" 2>/dev/null; then
   fail "phase 1: server process $SERVER_PID still alive after app exit"
 fi
