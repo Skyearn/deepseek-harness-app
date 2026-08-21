@@ -113,7 +113,8 @@ fi
 # --- Optional self-contained dsh bundle ----------------------------------------
 if [[ "${BUNDLE_DSH}" -eq 1 ]]; then
   echo "==> Bundling @deepseek-ai/dsh into Resources/dsh"
-  npm install --prefix "${RES_DIR}/dsh" "@deepseek-ai/dsh@${DSH_BUNDLE_VERSION:-latest}"
+  NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}" \
+    npm install --prefix "${RES_DIR}/dsh" "@deepseek-ai/dsh@${DSH_BUNDLE_VERSION:-latest}"
 
   # Bundle a node runtime (arm64 + x64, lipo-merged) so the app needs no
   # system node. Only the node binary is kept — npm, corepack, and docs are
