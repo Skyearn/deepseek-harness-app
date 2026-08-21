@@ -333,7 +333,7 @@ final class ServerController {
             return
         }
 
-        var arguments = [dshPath, "web"]
+        var arguments = [dshPath, "web", "--no-open"]
         if port != 3080 { arguments += ["--port", String(port)] }
         let nodeDir = URL(fileURLWithPath: nodePath).deletingLastPathComponent().path
         let environment = childEnvironment(extraPathDirs: [nodeDir])

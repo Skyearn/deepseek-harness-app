@@ -270,7 +270,7 @@ namespace DeepSeekHarness
 
             Process process = new Process();
             process.StartInfo.FileName = NodePath;
-            process.StartInfo.Arguments = "\"" + DshPath + "\" web";
+            process.StartInfo.Arguments = "\"" + DshPath + "\" web --no-open";
             if (Settings.Port != 3080) process.StartInfo.Arguments += " --port " + Settings.Port;
             process.StartInfo.UseShellExecute = false;
             process.StartInfo.CreateNoWindow = true;
