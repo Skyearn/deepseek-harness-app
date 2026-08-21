@@ -54,9 +54,9 @@ wait_for() {
 wait_lock() {
   local timeout=${1:-120} exclude=${2:-} waited=0 pid
   while [ "$waited" -lt $((timeout * 10)) ]; do
-    if [ -f "$STATE_DIR/server.pid" ]; then
-      pid=$(awk '{print $1}' "$STATE_DIR/server.pid" 2>/dev/null)
-      if [ -z "$exclude" ] || [ "$pid" != "$exclude" ]; then
+    if [ -f "$STATE_DIR/server.pid" ] && [ -s "$STATE_DIR/server.pid" ]; then
+      pid=$(awk '{print $1}' "$STATE_DIR/server.pid" 2>/dev/null || true)
+      if [ -n "$pid" ] && { [ -z "$exclude" ] || [ "$pid" != "$exclude" ]; }; then
         return 0
       fi
     fi
@@ -130,7 +130,17 @@ pass "phase 2: orphaned server $ORPHAN_PID survives the app crash (port still op
 echo "==> phase 2: relaunching the app (recovery should reclaim the orphan)"
 launch_app
 wait_lock 120 "$ORPHAN_PID" || fail "phase 2: no new server.pid lock"
-NEW_PID=$(awk '{print $1}' "$STATE_DIR/server.pid")
+NEW_PID=""
+for _ in $(seq 1 50); do
+  if [ -f "$STATE_DIR/server.pid" ] && [ -s "$STATE_DIR/server.pid" ]; then
+    NEW_PID=$(awk '{print $1}' "$STATE_DIR/server.pid" 2>/dev/null || true)
+    if [ -n "$NEW_PID" ]; then
+      break
+    fi
+  fi
+  sleep 0.1
+done
+[ -n "$NEW_PID" ] || fail "phase 2: new server.pid has no pid"
 wait_for "$TEST_PORT" open 60 || fail "phase 2: port did not reopen"
 sleep 2
 
