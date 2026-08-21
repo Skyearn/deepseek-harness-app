@@ -106,14 +106,13 @@ jobs:
           git push origin master
           TAG="app-v${NEW_VERSION}"
           SHA="$(git rev-parse HEAD)"
-          # Creating a tag ref via the API fires the same tag push event as a
-          # git push; a tag that exists without a release (a previous build
-          # failure) is deleted first so the event fires again.
+          # Push the tag through git: API-created refs do not trigger tag-push
+          # Actions when using GITHUB_TOKEN. If a previous build left the tag
+          # without a release, delete it first so the event fires again.
           if gh api "repos/${GH_REPO}/git/refs/tags/${TAG}" >/dev/null 2>&1; then
             echo "Tag ${TAG} exists without a release; recreating it at HEAD to re-trigger the build."
             gh api --method DELETE "repos/${GH_REPO}/git/refs/tags/${TAG}" >/dev/null
           fi
-          gh api --method POST "repos/${GH_REPO}/git/refs" \
-            -f "ref=refs/tags/${TAG}" \
-            -f "sha=${SHA}"
-          echo "Tag ${TAG} created at ${SHA}; app-release.yml is building the release."
+          git tag -f "${TAG}" HEAD
+          git push origin "${TAG}"
+          echo "Tag ${TAG} pushed at ${SHA}; app-release.yml is building the release."
