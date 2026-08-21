@@ -4,14 +4,14 @@
 
 本仓库将 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）封装为原生桌面应用。它是 `deepseek-ai/deepseek-harness` 的 fork，在未改动的 Web 运行器之上增加了一层应用外壳：每个平台的外壳启动 `dsh web`，以内嵌 Web 视图呈现同一套 UI，并接管服务器进程——退出应用时终止服务器并释放端口。
 
-![DeepSeek Harness 桌面应用](assets/app-screenshot.png)
+![DeepSeek Harness 桌面应用](apps/macos/app-screenshot.png)
 
 ## 应用
 
 | 平台 | 外壳 | 发布包 |
 |---|---|---|
-| macOS | [apps/macos](apps/macos/README.md) — Swift + WKWebView | `DeepSeek-Harness-<version>-macos-universal.zip`（arm64 + x86_64） |
-| Windows | [apps/windows](apps/windows/README.md) — C# .NET Framework + WebView2 | `DeepSeek-Harness-<version>-windows-x64.zip` |
+| macOS | [apps/macos](apps/macos/README.zh.md) — Swift + WKWebView | `DeepSeek-Harness-<version>-macos-universal.zip`（arm64 + x86_64） |
+| Windows | [apps/windows](apps/windows/README.zh.md) — C# .NET Framework + WebView2 | `DeepSeek-Harness-<version>-windows-x64.zip` |
 
 两个外壳提供相同的行为：程序坞/任务栏图标、内嵌 UI 窗口、退出时保证清理、单实例限制、崩溃后回收孤儿服务器进程，以及显式的"在浏览器中打开"（不会自动打开系统浏览器）。
 

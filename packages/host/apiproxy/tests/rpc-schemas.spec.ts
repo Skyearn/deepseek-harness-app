@@ -193,8 +193,16 @@ describe('sessions domain schemas', () => {
     })).toThrow()
     expect(sessionCreateRequestSchema.parse({ cwd: '/w' }).cwd).toBe('/w')
     // The refine's both-sides branch: workspaceId alone passes, workspaceId+cwd rejects.
-    expect(sessionCreateRequestSchema.parse({ workspaceId: 'w1', sessionId: 's1' }).sessionId).toBe('s1')
+    expect(sessionCreateRequestSchema.parse({
+      workspaceId: 'w1', sessionId: 's1', reuseWorkspaceBlank: true,
+    }).reuseWorkspaceBlank).toBe(true)
     expect(() => sessionCreateRequestSchema.parse({ workspaceId: 'w1', cwd: '/w' })).toThrow(/not both/)
+    expect(() => sessionCreateRequestSchema.parse({
+      workspaceId: 'w1', reuseWorkspaceBlank: true,
+    })).toThrow(/requires workspaceId and sessionId/)
+    expect(() => sessionCreateRequestSchema.parse({
+      sessionId: 's1', reuseWorkspaceBlank: true,
+    })).toThrow(/requires workspaceId and sessionId/)
     expect(sessionCreateValueSchema.parse({ sessionId: 's1' }).sessionId).toBe('s1')
     expect(sessionHistoryRequestSchema.parse({ sessionId: 's1', beforeSeq: 3, maxMessages: 5 }).beforeSeq).toBe(3)
     expect(() => sessionHistoryRequestSchema.parse({ sessionId: 's1', maxMessages: 0 })).toThrow()
@@ -312,14 +320,17 @@ describe('host domain schemas', () => {
   it('validates describe request/value', () => {
     expect(hostDescribeRequestSchema.parse({})).toEqual({})
     const value = hostDescribeValueSchema.parse({
-      version: '1', cwd: '/x', provider: 'p', model: 'm', attachedSessions: 2, canOpenPath: true,
+      version: '1', cwd: '/x', provider: 'p', model: 'm', attachedSessions: 2, home: '/h', canOpenPath: true,
     })
     expect(value).toMatchObject({ provider: 'p', model: 'm', attachedSessions: 2, canOpenPath: true })
     expect(hostDescribeValueSchema.parse({
-      version: '1', cwd: '/x', attachedSessions: 0, canOpenPath: false,
+      version: '1', cwd: '/x', attachedSessions: 0, home: '/h', canOpenPath: false,
     }).provider).toBeUndefined()
     expect(() => hostDescribeValueSchema.parse({
       version: '1', cwd: '/x', attachedSessions: 0,
+    })).toThrow()
+    expect(() => hostDescribeValueSchema.parse({
+      version: '1', cwd: '/x', attachedSessions: 0, canOpenPath: true,
     })).toThrow()
   })
 

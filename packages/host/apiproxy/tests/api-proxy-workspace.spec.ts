@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -64,6 +64,7 @@ async function harness(
   extras: {
     openPath?: (path: string, signal: AbortSignal) => Promise<void>
     canOpenPath?: () => boolean
+    refreshDefaultForReuse?: (session: Session) => void
   } = {},
 ) {
   const ctx = new Context()
@@ -102,6 +103,11 @@ async function harness(
   // Structural picker fake: the gateway only reads capability(); a stable
   // object per harness mirrors the seam's stability contract.
   ctx.provide('directoryPicker', { capability: () => picker } as never)
+  if (extras.refreshDefaultForReuse !== undefined) {
+    ctx.provide('permissionPresets', {
+      refreshDefaultForReuse: extras.refreshDefaultForReuse,
+    } as never)
+  }
   const api = createApiProxy(ctx, {
     defaultModelSelection: () => ({ provider: 'test', model: 'test-model' }),
     cwd: root,
@@ -234,6 +240,7 @@ describe('host.openPath', () => {
     const headless = await harness(undefined, undefined, { canOpenPath: () => false })
     expect(expectOk(await visible.api.host.describe(request({}))).canOpenPath).toBe(true)
     expect(expectOk(await headless.api.host.describe(request({}))).canOpenPath).toBe(false)
+    expect(expectOk(await visible.api.host.describe(request({}))).home).toBe(homedir())
   })
 
   it('opens through the injected native boundary', async () => {
@@ -364,6 +371,63 @@ describe('workspace.insertBefore', () => {
 })
 
 describe('session creation and Workspace membership', () => {
+  it('notifies the permission owner only while the confirmed reuse target remains eligible', async () => {
+    const refreshDefaultForReuse = vi.fn<(session: Session) => void>()
+    const { api, ctx, root } = await harness(undefined, undefined, { refreshDefaultForReuse })
+    const workspace = expectOk(await api.workspace.create(request({
+      path: stageDir(root, 'permission-refresh'),
+    }))).workspace
+    const reusedId = SessionId('session-reused-blank')
+    expectOk(await api.sessions.create(request({
+      workspaceId: workspace.workspaceId,
+      sessionId: reusedId,
+    })))
+    expect(refreshDefaultForReuse).not.toHaveBeenCalled()
+
+    expectOk(await api.sessions.create(request({
+      workspaceId: workspace.workspaceId,
+      sessionId: reusedId,
+      reuseWorkspaceBlank: true,
+    })))
+    expect(refreshDefaultForReuse).toHaveBeenCalledOnce()
+    expect(refreshDefaultForReuse.mock.calls[0]?.[0].id).toBe(reusedId)
+
+    const reused = ctx.sessions.get(reusedId)
+    if (reused === undefined) throw new Error('reused session was not published')
+    reused.append('turn/start', { turn: 1 })
+    expectOk(await api.sessions.create(request({
+      workspaceId: workspace.workspaceId,
+      sessionId: reusedId,
+      reuseWorkspaceBlank: true,
+    })))
+    expect(refreshDefaultForReuse).toHaveBeenCalledOnce()
+
+    const archivedId = SessionId('session-archived-blank')
+    expectOk(await api.sessions.create(request({
+      workspaceId: workspace.workspaceId,
+      sessionId: archivedId,
+    })))
+    expectOk(await api.workspace.archiveSession(request({ sessionId: archivedId })))
+    expectOk(await api.sessions.create(request({
+      workspaceId: workspace.workspaceId,
+      sessionId: archivedId,
+      reuseWorkspaceBlank: true,
+    })))
+    expect(refreshDefaultForReuse).toHaveBeenCalledOnce()
+
+    const nonMemberId = SessionId('session-non-member-blank')
+    expectOk(await api.sessions.create(request({
+      cwd: workspace.path,
+      sessionId: nonMemberId,
+    })))
+    expectOk(await api.sessions.create(request({
+      workspaceId: workspace.workspaceId,
+      sessionId: nonMemberId,
+      reuseWorkspaceBlank: true,
+    })))
+    expect(refreshDefaultForReuse).toHaveBeenCalledOnce()
+  })
+
   it('attaches a preallocated idempotent session while cwd-only sessions stay ungrouped', async () => {
     const { api, ctx, root } = await harness()
     const workspace = expectOk(await api.workspace.create(request({ path: stageDir(root, 'project') }))).workspace

@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 This repository packages [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) as native desktop applications. It is a fork of `deepseek-ai/deepseek-harness` that adds an app shell layer on top of the unchanged web runner: each platform shell launches `dsh web`, serves the same UI in an embedded web view, and owns the server process — quitting the app terminates the server and releases the port.
 
-![DeepSeek Harness desktop app](assets/app-screenshot.png)
+![DeepSeek Harness desktop app](apps/macos/app-screenshot.png)
 
 ## Applications
 

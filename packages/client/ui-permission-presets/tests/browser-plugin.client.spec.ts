@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest'
 import { SlotRegistry, type SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
+import { apply as settingsApply, inject as settingsInject } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { CommandDecoration } from '@deepseek-ai/dsh-client-ui-commands/client'
 import type { PermissionSelect } from '@deepseek-ai/dsh-permission-presets/client'
 import {
@@ -58,6 +59,7 @@ async function bench() {
       },
     },
   } as never)
+  await ctx.plugin({ inject: [...settingsInject], apply: settingsApply }).await()
   let decoration: CommandDecoration | undefined
   ctx.provide('commandUi', {
     decorate(c: CommandDecoration) {
@@ -126,7 +128,7 @@ describe('ui-permission browser plugin', () => {
     const again = await c.ui.options(proj, new AbortController().signal)
     expect(again.find(option => option.id === 'workspace-write')?.active).toBe(true)
     expect(again.find(option => option.id === 'read-only')?.detail).toBe('Reads only.')
-    // Kebab-case names title-case; non-kebab host-configured names pass through.
+    // Built-ins use product labels; other kebab-case names title-case.
     expect(again.map(option => option.label)).toEqual(['Read Only', 'Workspace Write', 'Full access'])
     expect(again.find(option => option.id === 'danger-full-access')?.confirmation).toEqual({
       title: 'Enable Full access?',
@@ -135,9 +137,17 @@ describe('ui-permission browser plugin', () => {
       cancelLabel: 'Cancel',
       confirmLabel: 'Enable Full access',
     })
-    b.values.set(sid('s1'), { ...SELECT, options: [{ value: 'plain', name: 'Ask Every Time' }] })
+    b.values.set(sid('s1'), { ...SELECT, options: [
+      { value: 'workspace-write', name: 'Project Files' },
+      { value: 'danger-full-access', name: 'Operator Mode' },
+      { value: 'custom-mode', name: 'custom-mode' },
+      { value: '__proto__', name: '__proto__' },
+      { value: 'plain', name: 'Ask Every Time' },
+    ] })
     const passthrough = await c.ui.options(proj, new AbortController().signal)
-    expect(passthrough[0]?.label).toBe('Ask Every Time')
+    expect(passthrough.map(option => option.label)).toEqual([
+      'Project Files', 'Operator Mode', 'Custom Mode', '__proto__', 'Ask Every Time',
+    ])
     // A projection that vanished between availability and open throws.
     expect(() => c.ui.options({ sessionId: sid('ghost') }, new AbortController().signal))
       .toThrow(/not available on this host/)

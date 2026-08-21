@@ -104,9 +104,14 @@ export const sessionCreateRequestSchema = z.object({
   cwd: z.string().optional(),
   sessionId: sessionIdSchema.optional(),
   agentPreset: z.string().optional(),
+  reuseWorkspaceBlank: z.literal(true).optional(),
 }).refine(
   payload => payload.workspaceId === undefined || payload.cwd === undefined,
   { message: 'session.create accepts workspaceId or cwd, not both' },
+).refine(
+  payload => payload.reuseWorkspaceBlank !== true
+    || (payload.workspaceId !== undefined && payload.sessionId !== undefined),
+  { message: 'session.create reuseWorkspaceBlank requires workspaceId and sessionId' },
 ) satisfies z.ZodType<Wire<RequestPayload<'session.create'>>>
 
 /** session.create response value. */
@@ -231,6 +236,7 @@ export const imageLimitsProjectionSchema = z.object({
   maxImagesPerMessage: z.number().int().positive(),
   maxMessageImageBytes: z.number().int().positive(),
   maxImagePixels: z.number().int().positive(),
+  maxImageDimension: z.number().int().positive(),
   mediaTypes: z.array(z.string()),
 }) as unknown as z.ZodType<ImageAttachmentLimits>
 
