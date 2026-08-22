@@ -678,6 +678,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return
         }
         ServerController.shared.writeAppLock()
+        let hasBundledDsh = (Bundle.main.resourceURL?.appendingPathComponent("dsh").path)
+            .map { FileManager.default.fileExists(atPath: $0) } ?? false
+        if managedCoreDSHPath() == nil && !hasBundledDsh {
+            _ = parseUpdateOutput(runUpdater(arguments: ["bootstrap"]))
+        }
         if !ServerController.shared.resolvePaths() {
             let bootstrap = parseUpdateOutput(runUpdater(arguments: ["bootstrap"]))
             if bootstrap["BOOTSTRAP_OK"] == "1" {

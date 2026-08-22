@@ -675,6 +675,12 @@ namespace DeepSeekHarness
             base.OnLoad(e);
             Application.ApplicationExit += delegate { server.Terminate(); };
             server.WriteAppLock();
+            bool hasBundledDsh = File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                "dsh", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js"));
+            if (!hasBundledDsh && !RuntimeComplete())
+            {
+                RunUpdater("bootstrap");
+            }
             server.Resolve();
             if (server.DshPath.Length == 0 || server.NodePath.Length == 0)
             {
@@ -938,6 +944,26 @@ namespace DeepSeekHarness
             }
             catch (Exception)
             {
+            }
+        }
+
+        private static bool RuntimeComplete()
+        {
+            try
+            {
+                string root = Path.Combine(Settings.StatePath(), "runtime");
+                string currentFile = Path.Combine(root, "current");
+                if (!File.Exists(currentFile)) return false;
+                string version = File.ReadAllText(currentFile).Trim();
+                if (version.Length == 0) return false;
+                string versionRoot = Path.Combine(root, "versions", version);
+                string entry = Path.Combine(versionRoot, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
+                string marker = Path.Combine(versionRoot, ".complete");
+                return File.Exists(entry) && File.Exists(marker) && File.Exists(Path.Combine(root, "node", "node.exe"));
+            }
+            catch (Exception)
+            {
+                return false;
             }
         }
 
