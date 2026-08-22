@@ -987,6 +987,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return dict
     }
 
+    private func isVersionAtLeast(_ current: String, _ latest: String) -> Bool {
+        let a = current.split(separator: ".").compactMap { Int($0) }
+        let b = latest.split(separator: ".").compactMap { Int($0) }
+        let count = max(a.count, b.count)
+        for i in 0..<count {
+            let x = i < a.count ? a[i] : 0
+            let y = i < b.count ? b[i] : 0
+            if x != y { return x > y }
+        }
+        return true
+    }
+
+    private func updateLine(name: String, current: String, latest: String) -> String {
+        if current.isEmpty || current == "?" { return "\(name)：未安装 -> \(latest)" }
+        if isVersionAtLeast(current, latest) { return "\(name)：\(current)（已是最新）" }
+        return "\(name)：\(current) -> \(latest)"
+    }
+
     @objc private func checkUpdates(_ sender: Any?) {
         let output = runUpdater(arguments: ["check", "--shell-current", shellVersion()])
         let info = parseUpdateOutput(output)
@@ -996,7 +1014,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let coreLatest = info["CORE_LATEST"] ?? "?"
         let alert = NSAlert()
         alert.messageText = "检查更新"
-        alert.informativeText = "壳：\(shellCurrent) -> \(shellLatest)\n内核：\(coreCurrent.isEmpty ? "未安装" : coreCurrent) -> \(coreLatest)"
+        alert.informativeText = "\(updateLine(name: "壳", current: shellCurrent, latest: shellLatest))\n\(updateLine(name: "内核", current: coreCurrent, latest: coreLatest))"
         alert.addButton(withTitle: "好")
         alert.runModal()
     }

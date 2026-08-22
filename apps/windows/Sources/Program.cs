@@ -845,6 +845,30 @@ namespace DeepSeekHarness
             return info.TryGetValue(key, out value) ? value : fallback;
         }
 
+        private static bool IsVersionAtLeast(string current, string latest)
+        {
+            if (current == latest) return true;
+            string[] a = current.Split('.');
+            string[] b = latest.Split('.');
+            int count = Math.Max(a.Length, b.Length);
+            for (int i = 0; i < count; i++)
+            {
+                int x = i < a.Length ? 0 : 0;
+                int y = i < b.Length ? 0 : 0;
+                int.TryParse(i < a.Length ? a[i] : "0", out x);
+                int.TryParse(i < b.Length ? b[i] : "0", out y);
+                if (x != y) return x > y;
+            }
+            return true;
+        }
+
+        private static string UpdateLine(string name, string current, string latest)
+        {
+            if (current.Length == 0 || current == "?") return name + ": 未安装 -> " + latest;
+            if (IsVersionAtLeast(current, latest)) return name + ": " + current + "（已是最新）";
+            return name + ": " + current + " -> " + latest;
+        }
+
         private void CheckUpdates()
         {
             string output = RunUpdater("check --shell-current \"" + ShellVersion() + "\"");
@@ -858,8 +882,8 @@ namespace DeepSeekHarness
             string shellLatest = Get(info, "SHELL_LATEST", "?");
             string coreCurrent = Get(info, "CORE_CURRENT", "");
             string coreLatest = Get(info, "CORE_LATEST", "?");
-            string text = "壳: " + shellCurrent + " -> " + shellLatest + "\n"
-                + "内核: " + (coreCurrent.Length == 0 ? "未安装" : coreCurrent) + " -> " + coreLatest;
+            string text = UpdateLine("壳", shellCurrent, shellLatest) + "\n"
+                + UpdateLine("内核", coreCurrent, coreLatest);
             MessageBox.Show(this, text, "检查更新", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
