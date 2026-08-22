@@ -1,0 +1,112 @@
+# Automatically build and publish prebuilt dsh runtime bundles when upstream
+# publishes a new @deepseek-ai/dsh version. Shell apps download these bundles on
+# first launch instead of running npm install.
+name: Runtime Release
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  detect:
+    name: Detect upstream dsh version
+    runs-on: ubuntu-latest
+    outputs:
+      dsh_version: ${{ steps.version.outputs.dsh }}
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Get latest @deepseek-ai/dsh version
+        id: version
+        run: |
+          DSH_VERSION="$(npm view @deepseek-ai/dsh version)"
+          echo "dsh=${DSH_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Check if runtime release already exists
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="dsh-runtime-${{ steps.version.outputs.dsh }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "runtime release ${TAG} already exists"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-macos:
+    name: Build prebuilt runtime (macOS)
+    needs: detect
+    if: ${{ needs.detect.outputs.skip != 'true' }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Build runtime bundle
+        run: bash scripts/build-runtime-macos.sh "${{ needs.detect.outputs.dsh_version }}" dist/dsh-runtime-${{ needs.detect.outputs.dsh_version }}-macos-universal.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-runtime-macos
+          path: dist/dsh-runtime-*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  build-windows:
+    name: Build prebuilt runtime (Windows)
+    needs: detect
+    if: ${{ needs.detect.outputs.skip != 'true' }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Build runtime bundle
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts/build-runtime-windows.ps1 -DshVersion "${{ needs.detect.outputs.dsh_version }}" -Out "dist/dsh-runtime-${{ needs.detect.outputs.dsh_version }}-windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-runtime-windows
+          path: dist/dsh-runtime-*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish runtime release
+    needs: [detect, build-macos, build-windows]
+    if: ${{ needs.detect.outputs.skip != 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dsh-runtime-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          DSH_VERSION="${{ needs.detect.outputs.dsh_version }}"
+          TAG="dsh-runtime-${DSH_VERSION}"
+          if [[ -z "$(ls dist/dsh-runtime-* 2>/dev/null)" ]]; then
+            echo "::error::no runtime bundle assets found"
+            exit 1
+          fi
+          NOTES="Prebuilt DeepSeek Harness runtime bundle for @deepseek-ai/dsh@${DSH_VERSION}."
+          gh release create "$TAG" dist/dsh-runtime-* --title "dsh runtime ${DSH_VERSION}" --notes "$NOTES"

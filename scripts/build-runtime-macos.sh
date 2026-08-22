@@ -2,9 +2,13 @@
 set -euo pipefail
 
 DSH_VERSION="${1:?dsh version required}"
-SHELL_VERSION="${2:-current}"
+SHELL_VERSION="${2:-}"
 NODE_VERSION="${NODE_BUNDLE_VERSION:-v24.12.0}"
-OUT="${3:-dist/dsh-runtime-${SHELL_VERSION}-${DSH_VERSION}-macos-universal.tar.gz}"
+if [ -n "$SHELL_VERSION" ]; then
+  OUT="${3:-dist/dsh-runtime-${SHELL_VERSION}-${DSH_VERSION}-macos-universal.tar.gz}"
+else
+  OUT="${3:-dist/dsh-runtime-${DSH_VERSION}-macos-universal.tar.gz}"
+fi
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
