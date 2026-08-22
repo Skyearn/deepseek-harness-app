@@ -10,7 +10,7 @@
 // Output is line oriented so both the Swift and C# shells can parse it.
 
 import https from 'node:https'
-import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, renameSync, writeFileSync } from 'node:fs'
+import { createWriteStream, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, renameSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
@@ -18,6 +18,7 @@ import { join, dirname } from 'node:path'
 const REPO = 'Skyearn/deepseek-harness-app'
 const NPM_PACKAGE = '@deepseek-ai/dsh'
 const COMPLETE_MARKER = '.complete'
+const NODE_VERSION = 'v24.12.0'
 
 const isWindows = process.platform === 'win32'
 const home = process.env.HOME || process.env.USERPROFILE || tmpdir()
@@ -30,6 +31,7 @@ const runtimeDir = join(appSupport, 'runtime')
 const versionsDir = join(runtimeDir, 'versions')
 const downloadsDir = join(runtimeDir, 'downloads')
 const currentFile = join(runtimeDir, 'current')
+const nodeRuntimeDir = join(runtimeDir, 'node')
 
 function request(url, redirects = 0) {
   return new Promise((resolve, reject) => {
@@ -83,10 +85,57 @@ function run(command, args) {
   return result.stdout
 }
 
+function nodeExecutablePath() {
+  return isWindows ? join(nodeRuntimeDir, 'node.exe') : join(nodeRuntimeDir, 'bin', 'node')
+}
+
+function nodeNpmPath() {
+  return isWindows ? join(nodeRuntimeDir, 'npm.cmd') : join(nodeRuntimeDir, 'bin', 'npm')
+}
+
+async function ensureNodeRuntime() {
+  if (existsSync(nodeExecutablePath())) return
+  const platform = isWindows ? 'win-x64' : `darwin-${process.arch}`
+  const archiveName = `node-${NODE_VERSION}-${platform}.${isWindows ? 'zip' : 'tar.gz'}`
+  const url = `https://nodejs.org/dist/${NODE_VERSION}/${archiveName}`
+  const archive = join(downloadsDir, archiveName)
+  await download(url, archive)
+
+  const extractDir = join(downloadsDir, `.node-${NODE_VERSION}-${platform}`)
+  rmSync(extractDir, { recursive: true, force: true })
+  mkdirSync(extractDir, { recursive: true })
+  const tar = isWindows ? 'tar.exe' : 'tar'
+  run(tar, ['-xf', archive, '-C', extractDir])
+
+  const extracted = join(extractDir, `node-${NODE_VERSION}-${platform}`)
+  if (!existsSync(extracted)) throw new Error('node archive extraction produced an unexpected layout')
+
+  rmSync(nodeRuntimeDir, { recursive: true, force: true })
+  mkdirSync(nodeRuntimeDir, { recursive: true })
+  cpSync(extracted, nodeRuntimeDir, { recursive: true })
+  if (!existsSync(nodeExecutablePath())) throw new Error('downloaded node runtime is missing the node executable')
+}
+
 function findNpm() {
+  if (existsSync(nodeNpmPath())) return nodeNpmPath()
   const candidates = isWindows
     ? ['npm.cmd', 'npm', 'C:\\Program Files\\nodejs\\npm.cmd', `${process.env.APPDATA}\\npm\\npm.cmd`]
-    : ['npm', '/opt/homebrew/bin/npm', '/usr/local/bin/npm', '/usr/bin/npm']
+    : ['npm', '/opt/homebrew/bin/npm', '/usr/local/bin/npm', '/usr/bin/npm',
+       `${home}/.npm-global/bin/npm`, `${home}/.local/bin/npm`]
+  // Include nvm/asdf/volta installs, the same locations the native shell scans.
+  try {
+    const nvmRoot = join(home, '.nvm', 'versions', 'node')
+    for (const version of readdirSync(nvmRoot)) {
+      candidates.push(join(nvmRoot, version, 'bin', 'npm'))
+    }
+  } catch {}
+  try {
+    const asdfRoot = join(home, '.asdf', 'installs', 'nodejs')
+    for (const version of readdirSync(asdfRoot)) {
+      candidates.push(join(asdfRoot, version, 'bin', 'npm'))
+    }
+  } catch {}
+  candidates.push(join(home, '.volta', 'bin', 'npm'), join(home, '.bun', 'bin', 'npm'))
   for (const candidate of candidates) {
     try {
       run(candidate, ['--version'])
@@ -190,6 +239,7 @@ async function updateCore() {
     return
   }
 
+  await ensureNodeRuntime()
   const npm = findNpm()
   const temp = join(versionsDir, `.tmp-${version}`)
   rmSync(temp, { recursive: true, force: true })
@@ -227,9 +277,13 @@ const command = process.argv[2] || 'check'
 try {
   if (command === 'check') await check()
   else if (command === 'update-core') await updateCore()
+  else if (command === 'bootstrap') {
+    await updateCore()
+    output([['BOOTSTRAP_OK', '1']])
+  }
   else if (command === 'download-shell') await downloadShell()
   else throw new Error(`unknown command: ${command}`)
 } catch (error) {
-  process.stderr.write(`ERROR: ${error.message}\n`)
+  process.stdout.write(`ERROR: ${error.message}\n`)
   process.exit(1)
 }

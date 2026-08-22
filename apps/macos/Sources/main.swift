@@ -678,7 +678,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return
         }
         ServerController.shared.writeAppLock()
-        ServerController.shared.resolvePaths()
+        if !ServerController.shared.resolvePaths() {
+            let bootstrap = parseUpdateOutput(runUpdater(arguments: ["bootstrap"]))
+            if bootstrap["BOOTSTRAP_OK"] == "1" {
+                _ = ServerController.shared.resolvePaths()
+            }
+        }
         ServerController.shared.recoverStaleServer()
         ServerController.shared.start()
     }

@@ -676,6 +676,14 @@ namespace DeepSeekHarness
             Application.ApplicationExit += delegate { server.Terminate(); };
             server.WriteAppLock();
             server.Resolve();
+            if (server.DshPath.Length == 0 || server.NodePath.Length == 0)
+            {
+                string bootstrapOutput = RunUpdater("bootstrap");
+                if (ParseUpdateOutput(bootstrapOutput).ContainsKey("BOOTSTRAP_OK"))
+                {
+                    server.Resolve();
+                }
+            }
             server.RecoverStale();
             string error = server.Start();
             if (error != null)

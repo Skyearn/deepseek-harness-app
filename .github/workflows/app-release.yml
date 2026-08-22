@@ -64,8 +64,7 @@ jobs:
       - name: Decide bundling
         id: decide
         run: |
-          RELEASE_PUSH="${{ github.event_name == 'push' && github.ref_type == 'tag' }}"
-          if [[ "$RELEASE_PUSH" == "true" || "${{ inputs.publish }}" == "true" || "${{ inputs.bundle_dsh }}" == "true" ]]; then
+          if [[ "${{ inputs.bundle_dsh }}" == "true" ]]; then
             echo "bundle=true" >> "$GITHUB_OUTPUT"
           else
             echo "bundle=false" >> "$GITHUB_OUTPUT"
@@ -143,8 +142,7 @@ jobs:
         id: decide
         shell: bash
         run: |
-          RELEASE_PUSH="${{ github.event_name == 'push' && github.ref_type == 'tag' }}"
-          if [[ "$RELEASE_PUSH" == "true" || "${{ inputs.publish }}" == "true" || "${{ inputs.bundle_dsh }}" == "true" ]]; then
+          if [[ "${{ inputs.bundle_dsh }}" == "true" ]]; then
             echo "bundle=true" >> "$GITHUB_OUTPUT"
           else
             echo "bundle=false" >> "$GITHUB_OUTPUT"
@@ -242,7 +240,7 @@ jobs:
             exit 1
           fi
           NOTES="DeepSeek Harness ${VERSION} for macOS (universal binary: Apple Silicon + Intel) and Windows (x64)."
-          NOTES+=$'\n\n- Bundles @deepseek-ai/dsh@'"${DSH_VERSION}"'.'
+          NOTES+=$'\n\n- Shell-only build: the dsh core and Node runtime are downloaded on first launch from upstream npm/nodejs.org.'
           NOTES+=$'\n- Each app launches `dsh web` unchanged and releases its port on quit.'
           NOTES+=$'\n- macOS builds are signed ad-hoc (not notarized): if Gatekeeper objects on first launch, right-click the app and choose Open.'
           if gh release view "$TAG" >/dev/null 2>&1; then
