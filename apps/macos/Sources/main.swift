@@ -659,6 +659,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var signalSources: [DispatchSourceSignal] = []
     private var lastFailure: String?
     private var showStatusBarItem: NSMenuItem?
+    private var progressIndicator: NSProgressIndicator?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installSignalHandlers()
@@ -682,9 +683,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             .map { FileManager.default.fileExists(atPath: $0) } ?? false
         if managedCoreDSHPath() == nil && !hasBundledDsh {
             statusLabel?.stringValue = "正在下载运行环境…"
+            progressIndicator?.startAnimation(nil)
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                let output = self?.runUpdater(arguments: ["bootstrap"]) ?? ""
+                let output = self?.runUpdater(arguments: ["bootstrap"], timeout: 1800) ?? ""
                 DispatchQueue.main.async {
+                    self?.progressIndicator?.stopAnimation(nil)
                     if self?.parseUpdateOutput(output)["BOOTSTRAP_OK"] == "1" {
                         _ = ServerController.shared.resolvePaths()
                         ServerController.shared.recoverStaleServer()
@@ -696,7 +699,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         } else {
             if !ServerController.shared.resolvePaths() {
-                let bootstrap = parseUpdateOutput(runUpdater(arguments: ["bootstrap"]))
+                let bootstrap = parseUpdateOutput(runUpdater(arguments: ["bootstrap"], timeout: 1800))
                 if bootstrap["BOOTSTRAP_OK"] == "1" {
                     _ = ServerController.shared.resolvePaths()
                 }
@@ -853,6 +856,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         urlField.translatesAutoresizingMaskIntoConstraints = false
         bar.addSubview(urlField)
 
+        let progress = NSProgressIndicator()
+        progress.style = .spinning
+        progress.controlSize = .small
+        progress.isIndeterminate = true
+        progress.isDisplayedWhenStopped = false
+        progress.translatesAutoresizingMaskIntoConstraints = false
+        bar.addSubview(progress)
+        progressIndicator = progress
+
         let webBottom = web.bottomAnchor.constraint(equalTo: bar.topAnchor)
 
         NSLayoutConstraint.activate([
@@ -866,6 +878,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             bar.heightAnchor.constraint(equalToConstant: 30),
             statusLabel.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 12),
             statusLabel.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            progressIndicator!.leadingAnchor.constraint(equalTo: statusLabel.trailingAnchor, constant: 8),
+            progressIndicator!.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            progressIndicator!.widthAnchor.constraint(equalToConstant: 16),
+            progressIndicator!.heightAnchor.constraint(equalToConstant: 16),
             urlField.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -12),
             urlField.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
         ])
@@ -994,12 +1010,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0.0.0"
     }
 
-    private func runUpdater(arguments: [String]) -> String {
+    private func runUpdater(arguments: [String], timeout: TimeInterval = 60) -> String {
         guard let node = resolveNode(),
               let script = Bundle.main.resourceURL?.appendingPathComponent("updater.mjs").path else {
             return "ERROR: 找不到 node 或 updater.mjs"
         }
-        return captureProcessOutput(executable: node, arguments: [script] + arguments, timeout: 60) ?? ""
+        return captureProcessOutput(executable: node, arguments: [script] + arguments, timeout: timeout) ?? ""
     }
 
     private func parseUpdateOutput(_ output: String) -> [String: String] {
