@@ -24,7 +24,7 @@ echo "$DSH_VERSION" > "$WORK/runtime/current"
 touch "$WORK/runtime/versions/${DSH_VERSION}/.complete"
 
 echo "==> Downloading Node ${NODE_VERSION}"
-mkdir -p "$WORK/runtime/node"
+mkdir -p "$WORK/runtime/node/bin"
 for arch in arm64 x64; do
   curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-darwin-${arch}.tar.gz" -o "$WORK/node-${arch}.tar.gz"
   tar -xzf "$WORK/node-${arch}.tar.gz" -C "$WORK"
