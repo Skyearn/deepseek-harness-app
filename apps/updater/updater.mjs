@@ -57,6 +57,10 @@ function requestJSON(url) {
   return request(url).then(text => JSON.parse(text))
 }
 
+function emitLine(line) {
+  process.stdout.write(`${line}\n`)
+}
+
 function download(url, dest) {
   return new Promise((resolve, reject) => {
     mkdirSync(dirname(dest), { recursive: true })
@@ -69,8 +73,21 @@ function download(url, dest) {
         reject(new Error(`HTTP ${res.statusCode} for ${url}`))
         return
       }
+      const total = Number(res.headers['content-length'] || 0)
+      let downloaded = 0
+      let lastReport = 0
       const file = createWriteStream(dest)
-      res.pipe(file)
+      res.on('data', chunk => {
+        downloaded += chunk.length
+        file.write(chunk)
+        if (total > 0 && (downloaded - lastReport >= 1024 * 1024 || downloaded === total)) {
+          lastReport = downloaded
+          emitLine(`PROGRESS=${downloaded}/${total}`)
+        }
+      })
+      res.on('end', () => {
+        file.end()
+      })
       file.on('finish', () => file.close(() => resolve()))
       file.on('error', reject)
     })
@@ -102,8 +119,10 @@ async function ensureNodeRuntime() {
   const archiveName = `node-${NODE_VERSION}-${platform}.${isWindows ? 'zip' : 'tar.gz'}`
   const url = `https://nodejs.org/dist/${NODE_VERSION}/${archiveName}`
   const archive = join(downloadsDir, archiveName)
+  emitLine('STATUS=downloading-node')
   await download(url, archive)
 
+  emitLine('STATUS=extracting-node')
   const extractDir = join(downloadsDir, `.node-${NODE_VERSION}-${platform}`)
   rmSync(extractDir, { recursive: true, force: true })
   mkdirSync(extractDir, { recursive: true })
@@ -113,6 +132,7 @@ async function ensureNodeRuntime() {
   const extracted = join(extractDir, `node-${NODE_VERSION}-${platform}`)
   if (!existsSync(extracted)) throw new Error('node archive extraction produced an unexpected layout')
 
+  emitLine('STATUS=preparing-node')
   rmSync(nodeRuntimeDir, { recursive: true, force: true })
   mkdirSync(nodeRuntimeDir, { recursive: true })
   cpSync(extracted, nodeRuntimeDir, { recursive: true })
@@ -253,7 +273,8 @@ async function updateCore() {
   // npm install creates the full dependency tree. The published @deepseek-ai/dsh
   // tarball is only the CLI entry package; its workspace dependencies are not
   // included in the tarball, so extracting it alone is not runnable.
-  run(npm, ['install', '--prefix', temp, '--no-audit', '--no-fund', `${NPM_PACKAGE}@${version}`], npmEnv)
+  emitLine('STATUS=installing-core')
+    run(npm, ['install', '--prefix', temp, '--no-audit', '--no-fund', `${NPM_PACKAGE}@${version}`], npmEnv)
 
   if (!existsSync(join(temp, 'node_modules', NPM_PACKAGE, 'lib', 'bin.js'))) {
     throw new Error('npm install did not produce the expected dsh CLI entry')

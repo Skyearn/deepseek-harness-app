@@ -685,7 +685,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             statusLabel?.stringValue = "正在下载运行环境…"
             progressIndicator?.startAnimation(nil)
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                let output = self?.runUpdater(arguments: ["bootstrap"], timeout: 1800) ?? ""
+                let output = self?.runUpdaterStreaming(arguments: ["bootstrap"], timeout: 1800) { progress in
+                    DispatchQueue.main.async { self?.statusLabel?.stringValue = progress }
+                } ?? ""
                 DispatchQueue.main.async {
                     self?.progressIndicator?.stopAnimation(nil)
                     if self?.parseUpdateOutput(output)["BOOTSTRAP_OK"] == "1" {
@@ -1016,6 +1018,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return "ERROR: 找不到 node 或 updater.mjs"
         }
         return captureProcessOutput(executable: node, arguments: [script] + arguments, timeout: timeout) ?? ""
+    }
+
+    private func runUpdaterStreaming(arguments: [String], timeout: TimeInterval, onProgress: @escaping (String) -> Void) -> String {
+        guard let node = resolveNode(),
+              let script = Bundle.main.resourceURL?.appendingPathComponent("updater.mjs").path else {
+            return "ERROR: 找不到 node 或 updater.mjs"
+        }
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: node)
+        process.arguments = [script] + arguments
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        let outputLock = NSLock()
+        var output = ""
+        pipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty { return }
+            let text = String(data: data, encoding: .utf8) ?? ""
+            outputLock.lock()
+            output += text
+            outputLock.unlock()
+            for line in text.components(separatedBy: .newlines) {
+                if line.hasPrefix("PROGRESS=") {
+                    onProgress(line.replacingOccurrences(of: "PROGRESS=", with: ""))
+                } else if line.hasPrefix("STATUS=") {
+                    onProgress(String(line.dropFirst(7)))
+                }
+            }
+        }
+        let done = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in done.signal() }
+        do {
+            try process.run()
+        } catch {
+            return "ERROR: \(error.localizedDescription)"
+        }
+        if done.wait(timeout: .now() + timeout) != .success {
+            process.terminate()
+        }
+        pipe.fileHandleForReading.readabilityHandler = nil
+        return output
     }
 
     private func parseUpdateOutput(_ output: String) -> [String: String] {
