@@ -7,6 +7,12 @@ on:
   schedule:
     - cron: '0 */6 * * *'
   workflow_dispatch:
+    inputs:
+      force:
+        description: Publish even if the release already exists
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -37,7 +43,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="dsh-runtime-${{ steps.version.outputs.dsh }}"
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          if [[ "${{ inputs.force }}" == "true" ]]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif gh release view "$TAG" >/dev/null 2>&1; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "runtime release ${TAG} already exists"
           else
@@ -93,6 +101,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
       - uses: actions/download-artifact@v4
         with:
           pattern: dsh-runtime-*
@@ -112,3 +124,28 @@ jobs:
           fi
           NOTES="Prebuilt DeepSeek Harness runtime bundle for @deepseek-ai/dsh@${DSH_VERSION}."
           gh release create "$TAG" dist/dsh-runtime-* --title "dsh runtime ${DSH_VERSION}" --notes "$NOTES"
+
+      - name: Publish runtime package to GitHub Packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          DSH_VERSION="${{ needs.detect.outputs.dsh_version }}"
+          PKG_DIR="runtime-package"
+          rm -rf "$PKG_DIR"
+          mkdir -p "$PKG_DIR"
+          cp dist/dsh-runtime-* "$PKG_DIR/"
+          cat > "$PKG_DIR/package.json" <<EOF
+          {
+            "name": "@skyearn/deepseek-harness-runtime",
+            "version": "${DSH_VERSION}",
+            "private": false,
+            "files": ["dsh-runtime-*"]
+          }
+          EOF
+          cat > "$PKG_DIR/.npmrc" <<EOF
+          //npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+          registry=https://npm.pkg.github.com
+          EOF
+          cd "$PKG_DIR"
+          npm publish --access public

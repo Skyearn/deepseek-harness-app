@@ -17,6 +17,7 @@ import { join, dirname, basename } from 'node:path'
 
 const REPO = 'Skyearn/deepseek-harness-app'
 const NPM_PACKAGE = '@deepseek-ai/dsh'
+const RUNTIME_PACKAGE = '@skyearn/deepseek-harness-runtime'
 const COMPLETE_MARKER = '.complete'
 const NODE_VERSION = 'v24.12.0'
 
@@ -259,6 +260,13 @@ async function runtimeBundleUrl() {
   return asset?.browser_download_url || ''
 }
 
+async function runtimePackageUrl() {
+  const encoded = encodeURIComponent(RUNTIME_PACKAGE.replace('/', '%2f'))
+  const pkg = await requestJSON(`https://npm.pkg.github.com/${encoded}`)
+  if (!pkg?.dist?.tarball) return ''
+  return pkg.dist.tarball
+}
+
 function output(entries) {
   for (const [key, value] of entries) {
     process.stdout.write(`${key}=${value}\n`)
@@ -324,7 +332,11 @@ async function updateCore() {
 }
 
 async function bootstrap() {
-  const url = await runtimeBundleUrl()
+  let url = ''
+  try { url = await runtimePackageUrl() } catch {}
+  if (!url) {
+    try { url = await runtimeBundleUrl() } catch {}
+  }
   if (url) {
     const archiveName = basename(url)
     const archive = join(downloadsDir, archiveName)
