@@ -78,8 +78,11 @@ function download(url, dest) {
   })
 }
 
-function run(command, args) {
-  const result = spawnSync(command, args, { encoding: 'utf8' })
+function run(command, args, env) {
+  const result = spawnSync(command, args, {
+    encoding: 'utf8',
+    env: env ? { ...process.env, ...env } : process.env,
+  })
   if (result.error) throw result.error
   if (result.status !== 0) throw new Error(`${command} failed: ${result.stderr || result.stdout}`)
   return result.stdout
@@ -241,6 +244,8 @@ async function updateCore() {
 
   await ensureNodeRuntime()
   const npm = findNpm()
+    const nodeBinDir = isWindows ? nodeRuntimeDir : join(nodeRuntimeDir, 'bin')
+    const npmEnv = { PATH: nodeBinDir + (isWindows ? ';' : ':') + (process.env.PATH || '') }
   const temp = join(versionsDir, `.tmp-${version}`)
   rmSync(temp, { recursive: true, force: true })
   mkdirSync(temp, { recursive: true })
@@ -248,7 +253,7 @@ async function updateCore() {
   // npm install creates the full dependency tree. The published @deepseek-ai/dsh
   // tarball is only the CLI entry package; its workspace dependencies are not
   // included in the tarball, so extracting it alone is not runnable.
-  run(npm, ['install', '--prefix', temp, '--no-audit', '--no-fund', `${NPM_PACKAGE}@${version}`])
+  run(npm, ['install', '--prefix', temp, '--no-audit', '--no-fund', `${NPM_PACKAGE}@${version}`], npmEnv)
 
   if (!existsSync(join(temp, 'node_modules', NPM_PACKAGE, 'lib', 'bin.js'))) {
     throw new Error('npm install did not produce the expected dsh CLI entry')
