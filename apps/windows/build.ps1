@@ -59,6 +59,10 @@ if (-not (Test-Path $csc)) { throw "csc.exe not found; .NET Framework 4.x is req
   (Join-Path $scriptDir 'Sources\Program.cs')
 if ($LASTEXITCODE -ne 0) { throw "csc failed with exit code $LASTEXITCODE" }
 
+# --- Update helper --------------------------------------------------------------
+Copy-Item (Join-Path $scriptDir '..\updater\updater.mjs') (Join-Path $outDir 'updater.mjs')
+Copy-Item (Join-Path $scriptDir '..\version') (Join-Path $outDir 'version.txt')
+
 if ($BundleDsh) {
   $dshDir = Join-Path $outDir 'dsh'
   Write-Host "==> Bundling @deepseek-ai/dsh@$DshVersion into $dshDir"

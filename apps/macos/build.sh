@@ -75,6 +75,10 @@ fi
 # --- Info.plist ---------------------------------------------------------------
 cp "${SCRIPT_DIR}/Resources/Info.plist" "${APP_DIR}/Contents/Info.plist"
 
+# --- Update helper --------------------------------------------------------------
+cp "${REPO_ROOT}/apps/updater/updater.mjs" "${RES_DIR}/updater.mjs"
+cp "${REPO_ROOT}/apps/version" "${RES_DIR}/version.txt"
+
 # --- App icon -------------------------------------------------------------------
 # Resources/AppIcon.icns is committed; regenerate it (rsvg-convert + iconutil)
 # only when it is missing. The committed icon centers the white mark at 70%

@@ -188,6 +188,22 @@ namespace DeepSeekHarness
         public static string FindDsh()
         {
             if (Settings.DshPath != null && File.Exists(Settings.DshPath)) return Settings.DshPath;
+            try
+            {
+                string currentFile = Path.Combine(Settings.StatePath(), "runtime", "current");
+                if (File.Exists(currentFile))
+                {
+                    string version = File.ReadAllText(currentFile).Trim();
+                    string pkg = Path.Combine(Settings.StatePath(), "runtime", "versions", version, "package");
+                    string libBin = Path.Combine(pkg, "lib", "bin.js");
+                    string dshBin = Path.Combine(pkg, "bin", "dsh");
+                    if (File.Exists(libBin)) return libBin;
+                    if (File.Exists(dshBin)) return dshBin;
+                }
+            }
+            catch (Exception)
+            {
+            }
             string bundled = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
                 "dsh", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
             if (File.Exists(bundled)) return bundled;
@@ -578,6 +594,16 @@ namespace DeepSeekHarness
             restartButton.Enabled = false;
             restartButton.Click += delegate { Restart(); };
 
+            Button updateButton = new Button();
+            updateButton.Text = "检查更新";
+            updateButton.Width = 90;
+            updateButton.Click += delegate { CheckUpdates(); };
+
+            Button coreButton = new Button();
+            coreButton.Text = "更新内核";
+            coreButton.Width = 90;
+            coreButton.Click += delegate { UpdateCore(); };
+
             Button logsButton = new Button();
             logsButton.Text = "打开日志";
             logsButton.Width = 90;
@@ -590,6 +616,8 @@ namespace DeepSeekHarness
 
             buttons.Controls.Add(openButton);
             buttons.Controls.Add(restartButton);
+            buttons.Controls.Add(updateButton);
+            buttons.Controls.Add(coreButton);
             buttons.Controls.Add(logsButton);
             buttons.Controls.Add(quitButton);
             bar.Controls.Add(buttons);
@@ -751,6 +779,97 @@ namespace DeepSeekHarness
             else
             {
                 Close();
+            }
+        }
+
+        // MARK: Updater
+
+        private string ShellVersion()
+        {
+            string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "version.txt");
+            if (File.Exists(path)) return File.ReadAllText(path).Trim();
+            return "0.0.0";
+        }
+
+        private string RunUpdater(string arguments)
+        {
+            string node = Resolver.FindNode();
+            string updater = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "updater.mjs");
+            if (node == null || !File.Exists(updater)) return "ERROR: 找不到 node 或 updater.mjs";
+            try
+            {
+                Process p = new Process();
+                p.StartInfo.FileName = node;
+                p.StartInfo.Arguments = "\"" + updater + "\" " + arguments;
+                p.StartInfo.UseShellExecute = false;
+                p.StartInfo.CreateNoWindow = true;
+                p.StartInfo.RedirectStandardOutput = true;
+                p.StartInfo.RedirectStandardError = true;
+                p.Start();
+                string output = p.StandardOutput.ReadToEnd();
+                string error = p.StandardError.ReadToEnd();
+                p.WaitForExit();
+                if (output.Length == 0) output = error;
+                return output;
+            }
+            catch (Exception ex)
+            {
+                return "ERROR: " + ex.Message;
+            }
+        }
+
+        private static Dictionary<string, string> ParseUpdateOutput(string output)
+        {
+            Dictionary<string, string> result = new Dictionary<string, string>();
+            foreach (string line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                int eq = line.IndexOf('=');
+                if (eq > 0)
+                {
+                    result[line.Substring(0, eq).Trim()] = line.Substring(eq + 1).Trim();
+                }
+            }
+            return result;
+        }
+
+        private static string Get(Dictionary<string, string> info, string key, string fallback)
+        {
+            string value;
+            return info.TryGetValue(key, out value) ? value : fallback;
+        }
+
+        private void CheckUpdates()
+        {
+            string output = RunUpdater("check --shell-current \"" + ShellVersion() + "\"");
+            if (output.StartsWith("ERROR"))
+            {
+                MessageBox.Show(this, output, "检查更新失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            Dictionary<string, string> info = ParseUpdateOutput(output);
+            string shellCurrent = Get(info, "SHELL_CURRENT", "?");
+            string shellLatest = Get(info, "SHELL_LATEST", "?");
+            string coreCurrent = Get(info, "CORE_CURRENT", "");
+            string coreLatest = Get(info, "CORE_LATEST", "?");
+            string text = "壳: " + shellCurrent + " -> " + shellLatest + "\n"
+                + "内核: " + (coreCurrent.Length == 0 ? "未安装" : coreCurrent) + " -> " + coreLatest;
+            MessageBox.Show(this, text, "检查更新", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void UpdateCore()
+        {
+            string output = RunUpdater("update-core");
+            Dictionary<string, string> info = ParseUpdateOutput(output);
+            if (Get(info, "CORE_UPDATED", "") == "1")
+            {
+                Restart();
+                MessageBox.Show(this, "内核已更新到 " + Get(info, "CORE_VERSION", "?"), "更新完成",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else
+            {
+                MessageBox.Show(this, output.Length == 0 ? "更新失败，请检查网络" : output, "内核更新失败",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 

@@ -35,6 +35,9 @@ enum Paths {
     static let serverLog = logs.appendingPathComponent("server.log")
     static let serverLock = appSupport.appendingPathComponent("server.pid")
     static let appLock = appSupport.appendingPathComponent("app.pid")
+    static let runtime = appSupport.appendingPathComponent("runtime", isDirectory: true)
+    static let runtimeVersions = runtime.appendingPathComponent("versions", isDirectory: true)
+    static let runtimeCurrent = runtime.appendingPathComponent("current")
 
     static func ensure(_ url: URL) {
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -94,16 +97,34 @@ enum ExecutableResolver {
     }
 }
 
-/// The dsh executable, in order: the `dshPath` preference, the dsh install
-/// bundled under Contents/Resources/dsh (from `build.sh --bundle-dsh`), then a
-/// PATH search. The first two sources may be non-executable files — the bin is
-/// launched through node, not directly.
+/// The dsh package installed by the shell updater under the runtime dir:
+/// ~/Library/Application Support/DeepSeek Harness/runtime/current.
+func managedCoreDSHPath() -> String? {
+    guard let current = try? String(contentsOf: Paths.runtimeCurrent, encoding: .utf8) else { return nil }
+    let version = current.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !version.isEmpty else { return nil }
+    let package = Paths.runtimeVersions
+        .appendingPathComponent(version, isDirectory: true)
+        .appendingPathComponent("package", isDirectory: true)
+    let lib = package.appendingPathComponent("lib/bin.js").path
+    let bin = package.appendingPathComponent("bin/dsh").path
+    if FileManager.default.fileExists(atPath: lib) { return lib }
+    if FileManager.default.fileExists(atPath: bin) { return bin }
+    return nil
+}
+
+/// The dsh executable, in order: the `dshPath` preference, the runtime install
+/// maintained by the shell updater, the dsh install bundled under
+/// Contents/Resources/dsh (from `build.sh --bundle-dsh`), then a PATH search.
+/// The first three sources may be non-executable files — the bin is launched
+/// through node, not directly.
 func resolveDSH() -> String? {
     let fm = FileManager.default
     if let override = UserDefaults.standard.string(forKey: "dshPath") {
         if fm.fileExists(atPath: override) { return override }
         NSLog("ignoring dshPath override: no file at %@", override)
     }
+    if let managed = managedCoreDSHPath() { return managed }
     if let resource = Bundle.main.resourceURL {
         for relative in ["dsh/node_modules/.bin/dsh", "dsh/bin/dsh"] {
             let candidate = resource.appendingPathComponent(relative).path
@@ -703,6 +724,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         appMenu.addItem(withTitle: "打开浏览器", action: #selector(openBrowser(_:)), keyEquivalent: "b")
         appMenu.addItem(withTitle: "重启服务", action: #selector(restartServer(_:)), keyEquivalent: "r")
         appMenu.addItem(withTitle: "打开日志", action: #selector(openLogs(_:)), keyEquivalent: "l")
+        appMenu.addItem(withTitle: "检查更新…", action: #selector(checkUpdates(_:)), keyEquivalent: "u")
+        appMenu.addItem(withTitle: "更新内核", action: #selector(updateCore(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "下载壳更新", action: #selector(downloadShellUpdate(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         let toggleStatusBar = NSMenuItem(title: "",
                                          action: #selector(toggleStatusBar(_:)), keyEquivalent: "")
@@ -909,6 +933,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func openLogs(_ sender: Any?) {
         Paths.ensure(Paths.logs)
         NSWorkspace.shared.open(Paths.logs)
+    }
+
+    // MARK: Updates
+
+    private func shellVersion() -> String {
+        if let url = Bundle.main.resourceURL?.appendingPathComponent("version.txt"),
+           let text = try? String(contentsOf: url, encoding: .utf8) {
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0.0.0"
+    }
+
+    private func runUpdater(arguments: [String]) -> String {
+        guard let node = resolveNode(),
+              let script = Bundle.main.resourceURL?.appendingPathComponent("updater.mjs").path else {
+            return "ERROR: 找不到 node 或 updater.mjs"
+        }
+        return captureProcessOutput(executable: node, arguments: [script] + arguments, timeout: 60) ?? ""
+    }
+
+    private func parseUpdateOutput(_ output: String) -> [String: String] {
+        var dict: [String: String] = [:]
+        for line in output.components(separatedBy: .newlines) {
+            if let eq = line.firstIndex(of: "=") {
+                let key = String(line[..<eq])
+                let value = String(line[line.index(after: eq)...])
+                dict[key] = value
+            }
+        }
+        return dict
+    }
+
+    @objc private func checkUpdates(_ sender: Any?) {
+        let output = runUpdater(arguments: ["check", "--shell-current", shellVersion()])
+        let info = parseUpdateOutput(output)
+        let shellCurrent = info["SHELL_CURRENT"] ?? "?"
+        let shellLatest = info["SHELL_LATEST"] ?? "?"
+        let coreCurrent = info["CORE_CURRENT"] ?? ""
+        let coreLatest = info["CORE_LATEST"] ?? "?"
+        let alert = NSAlert()
+        alert.messageText = "检查更新"
+        alert.informativeText = "壳：\(shellCurrent) -> \(shellLatest)\n内核：\(coreCurrent.isEmpty ? "未安装" : coreCurrent) -> \(coreLatest)"
+        alert.addButton(withTitle: "好")
+        alert.runModal()
+    }
+
+    @objc private func updateCore(_ sender: Any?) {
+        let output = runUpdater(arguments: ["update-core"])
+        let info = parseUpdateOutput(output)
+        if info["CORE_UPDATED"] == "1" {
+            ServerController.shared.restart()
+            let alert = NSAlert()
+            alert.messageText = "内核更新完成"
+            alert.informativeText = "已切换到 \(info["CORE_VERSION"] ?? "?")"
+            alert.addButton(withTitle: "好")
+            alert.runModal()
+        } else {
+            let alert = NSAlert()
+            alert.messageText = "内核更新失败"
+            alert.informativeText = output.isEmpty ? "请检查网络后重试" : output
+            alert.addButton(withTitle: "好")
+            alert.runModal()
+        }
+    }
+
+    @objc private func downloadShellUpdate(_ sender: Any?) {
+        let output = runUpdater(arguments: ["download-shell"])
+        let info = parseUpdateOutput(output)
+        if info["SHELL_DOWNLOADED"] == "1", let path = info["SHELL_DOWNLOAD"] {
+            NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
+        } else {
+            let alert = NSAlert()
+            alert.messageText = "壳更新下载失败"
+            alert.informativeText = output.isEmpty ? "请检查网络后重试" : output
+            alert.addButton(withTitle: "好")
+            alert.runModal()
+        }
     }
 
     // MARK: Status bar
