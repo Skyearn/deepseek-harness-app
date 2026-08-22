@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   detect:
@@ -98,6 +99,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: write
     steps:
       - uses: actions/checkout@v6
 
