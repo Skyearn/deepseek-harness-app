@@ -697,9 +697,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                            let total = Double(progress[progress.index(after: slash)...]),
                            total > 0 {
                             let ratio = min(done / total, 1)
+                            self.bootstrapProgress?.isHidden = false
                             self.bootstrapProgress?.doubleValue = ratio
                             self.bootstrapLabel?.stringValue = "正在下载运行环境… \(Int(ratio * 100))%"
                         } else {
+                            self.bootstrapProgress?.isHidden = true
                             self.bootstrapLabel?.stringValue = progress
                         }
                     }
