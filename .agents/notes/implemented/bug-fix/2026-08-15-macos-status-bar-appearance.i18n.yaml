@@ -1,6 +1,0 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
-#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-15-macos-status-bar-appearance.md
-2026-08-15-macos-status-bar-appearance.md: e42a375c2788bade39a6bc02b0725ce7956d8fc2
-2026-08-15-macos-status-bar-appearance.zh.md: 27564b5bb3ad434ebfdf8c06dbdeaf84d598cbca
