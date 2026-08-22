@@ -10,7 +10,7 @@
 // Output is line oriented so both the Swift and C# shells can parse it.
 
 import https from 'node:https'
-import { createWriteStream, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, renameSync, writeFileSync } from 'node:fs'
+import { createWriteStream, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, renameSync, writeFileSync, openSync, closeSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
@@ -105,6 +105,23 @@ function run(command, args, env) {
   return result.stdout
 }
 
+function runWithLog(command, args, env, logPath) {
+  mkdirSync(dirname(logPath), { recursive: true })
+  const fd = openSync(logPath, 'w')
+  try {
+    const result = spawnSync(command, args, {
+      encoding: 'utf8',
+      env: env ? { ...process.env, ...env } : process.env,
+      stdio: ['ignore', fd, fd],
+    })
+    if (result.error) throw result.error
+    if (result.status !== 0) throw new Error(`${command} failed: see ${logPath}`)
+    return result.stdout
+  } finally {
+    closeSync(fd)
+  }
+}
+
 function nodeExecutablePath() {
   return isWindows ? join(nodeRuntimeDir, 'node.exe') : join(nodeRuntimeDir, 'bin', 'node')
 }
@@ -119,10 +136,10 @@ async function ensureNodeRuntime() {
   const archiveName = `node-${NODE_VERSION}-${platform}.${isWindows ? 'zip' : 'tar.gz'}`
   const url = `https://nodejs.org/dist/${NODE_VERSION}/${archiveName}`
   const archive = join(downloadsDir, archiveName)
-  emitLine('STATUS=downloading-node')
+  emitLine('STATUS=正在下载 Node 运行环境…')
   await download(url, archive)
 
-  emitLine('STATUS=extracting-node')
+  emitLine('STATUS=正在解压 Node 运行环境…')
   const extractDir = join(downloadsDir, `.node-${NODE_VERSION}-${platform}`)
   rmSync(extractDir, { recursive: true, force: true })
   mkdirSync(extractDir, { recursive: true })
@@ -132,7 +149,7 @@ async function ensureNodeRuntime() {
   const extracted = join(extractDir, `node-${NODE_VERSION}-${platform}`)
   if (!existsSync(extracted)) throw new Error('node archive extraction produced an unexpected layout')
 
-  emitLine('STATUS=preparing-node')
+  emitLine('STATUS=正在准备 Node 运行环境…')
   rmSync(nodeRuntimeDir, { recursive: true, force: true })
   mkdirSync(nodeRuntimeDir, { recursive: true })
   cpSync(extracted, nodeRuntimeDir, { recursive: true })
@@ -273,8 +290,9 @@ async function updateCore() {
   // npm install creates the full dependency tree. The published @deepseek-ai/dsh
   // tarball is only the CLI entry package; its workspace dependencies are not
   // included in the tarball, so extracting it alone is not runnable.
-  emitLine('STATUS=installing-core')
-    run(npm, ['install', '--prefix', temp, '--no-audit', '--no-fund', `${NPM_PACKAGE}@${version}`], npmEnv)
+  emitLine('STATUS=正在安装 DSH 内核…')
+    const npmLogPath = join(runtimeDir, 'npm-install.log')
+    runWithLog(npm, ['install', '--prefix', temp, '--no-audit', '--no-fund', `${NPM_PACKAGE}@${version}`], npmEnv, npmLogPath)
 
   if (!existsSync(join(temp, 'node_modules', NPM_PACKAGE, 'lib', 'bin.js'))) {
     throw new Error('npm install did not produce the expected dsh CLI entry')
