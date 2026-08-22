@@ -15,6 +15,7 @@ New-Item -ItemType Directory -Force $Work | Out-Null
 try {
   New-Item -ItemType Directory -Force (Join-Path $Work 'runtime') | Out-Null
   Write-Host "==> Installing @deepseek-ai/dsh@$DshVersion"
+  $env:NODE_OPTIONS = if ($env:NODE_OPTIONS) { $env:NODE_OPTIONS } else { '--max-old-space-size=4096' }
   npm install --prefix (Join-Path $Work 'runtime') --no-audit --no-fund --prefer-offline "@deepseek-ai/dsh@$DshVersion"
 
   $versionDir = Join-Path $Work "runtime\versions\$DshVersion"
