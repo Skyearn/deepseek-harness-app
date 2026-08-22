@@ -685,7 +685,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 let output = self?.runUpdater(arguments: ["bootstrap"]) ?? ""
                 DispatchQueue.main.async {
-                    if parseUpdateOutput(output)["BOOTSTRAP_OK"] == "1" {
+                    if self?.parseUpdateOutput(output)["BOOTSTRAP_OK"] == "1" {
                         _ = ServerController.shared.resolvePaths()
                     }
                     ServerController.shared.recoverStaleServer()
