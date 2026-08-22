@@ -663,6 +663,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var bootstrapOverlay: NSView?
     private var bootstrapLabel: NSTextField?
     private var bootstrapProgress: NSProgressIndicator?
+    private var bootstrapIndeterminate: NSProgressIndicator?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installSignalHandlers()
@@ -697,20 +698,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                            let total = Double(progress[progress.index(after: slash)...]),
                            total > 0 {
                             let ratio = min(done / total, 1)
+                            self.bootstrapIndeterminate?.isHidden = true
+                            self.bootstrapIndeterminate?.stopAnimation(nil)
                             self.bootstrapProgress?.isHidden = false
-                            self.bootstrapProgress?.isIndeterminate = false
-                            self.bootstrapProgress?.stopAnimation(nil)
                             self.bootstrapProgress?.doubleValue = ratio
                             self.bootstrapLabel?.stringValue = "正在下载运行环境… \(Int(ratio * 100))%"
                         } else {
-                            self.bootstrapProgress?.isHidden = false
-                            self.bootstrapProgress?.isIndeterminate = true
-                            self.bootstrapProgress?.startAnimation(nil)
+                            self.bootstrapProgress?.isHidden = true
+                            self.bootstrapIndeterminate?.isHidden = false
+                            self.bootstrapIndeterminate?.startAnimation(nil)
                             self.bootstrapLabel?.stringValue = progress
                         }
                     }
                 } ?? ""
                 DispatchQueue.main.async {
+                    self?.bootstrapIndeterminate?.stopAnimation(nil)
+                    self?.bootstrapIndeterminate?.isHidden = true
+                    self?.bootstrapProgress?.isHidden = true
                     self?.bootstrapOverlay?.isHidden = true
                     if self?.parseUpdateOutput(output)["BOOTSTRAP_OK"] == "1" {
                         _ = ServerController.shared.resolvePaths()
@@ -919,6 +923,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         overlay.addSubview(overlayProgress)
         bootstrapProgress = overlayProgress
 
+        let overlayIndeterminate = NSProgressIndicator()
+        overlayIndeterminate.style = .bar
+        overlayIndeterminate.controlSize = .regular
+        overlayIndeterminate.isIndeterminate = true
+        overlayIndeterminate.isDisplayedWhenStopped = false
+        overlayIndeterminate.isHidden = true
+        overlayIndeterminate.translatesAutoresizingMaskIntoConstraints = false
+        overlay.addSubview(overlayIndeterminate)
+        bootstrapIndeterminate = overlayIndeterminate
+
         let webBottom = web.bottomAnchor.constraint(equalTo: bar.topAnchor)
 
         NSLayoutConstraint.activate([
@@ -948,6 +962,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             bootstrapProgress!.centerXAnchor.constraint(equalTo: bootstrapOverlay!.centerXAnchor),
             bootstrapProgress!.widthAnchor.constraint(equalToConstant: 320),
             bootstrapProgress!.heightAnchor.constraint(equalToConstant: 12),
+            bootstrapIndeterminate!.topAnchor.constraint(equalTo: bootstrapLabel!.bottomAnchor, constant: 12),
+            bootstrapIndeterminate!.centerXAnchor.constraint(equalTo: bootstrapOverlay!.centerXAnchor),
+            bootstrapIndeterminate!.widthAnchor.constraint(equalToConstant: 320),
+            bootstrapIndeterminate!.heightAnchor.constraint(equalToConstant: 12),
         ])
 
         self.webView = web
