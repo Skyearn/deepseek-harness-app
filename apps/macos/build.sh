@@ -94,7 +94,7 @@ if [[ -f "${SCRIPT_DIR}/Resources/AppIcon.icns" ]]; then
 elif command -v rsvg-convert >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
   echo "==> Generating AppIcon.icns"
   mkdir -p "${WORK}/AppIcon.iconset"
-  path_data="$(sed -n 's/.* d="\([^"]*\)".*/\1/p' "${REPO_ROOT}/apps/web/public/favicon.svg")"
+  path_data="$(sed -n 's/.* d="\([^"]*\)".*/\1/p' "${SCRIPT_DIR}/Resources/AppIcon.svg")"
   # The mark's source bbox is x[0.53,49.37] y[6.94,43.58] (center 24.95,25.26);
   # inset the rounded square by 10% and scale the mark to 0.62 so the Dock
   # icon has the same visual margin as standard macOS app icons.
