@@ -687,9 +687,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 DispatchQueue.main.async {
                     if self?.parseUpdateOutput(output)["BOOTSTRAP_OK"] == "1" {
                         _ = ServerController.shared.resolvePaths()
+                        ServerController.shared.recoverStaleServer()
+                        ServerController.shared.start()
+                    } else {
+                        self?.showBootstrapFailure(output)
                     }
-                    ServerController.shared.recoverStaleServer()
-                    ServerController.shared.start()
                 }
             }
         } else {
@@ -948,6 +950,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         default:
             NSApp.terminate(nil)
         }
+    }
+
+    private func showBootstrapFailure(_ output: String) {
+        let alert = NSAlert()
+        alert.messageText = "下载运行环境失败"
+        alert.informativeText = output.isEmpty ? "请检查网络后重试" : output
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "好")
+        alert.runModal()
     }
 
     private func installSignalHandlers() {

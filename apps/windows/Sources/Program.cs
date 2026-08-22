@@ -688,8 +688,14 @@ namespace DeepSeekHarness
                         if (ParseUpdateOutput(output).ContainsKey("BOOTSTRAP_OK"))
                         {
                             server.Resolve();
+                            StartServerAfterResolve();
                         }
-                        StartServerAfterResolve();
+                        else
+                        {
+                            MessageBox.Show(this,
+                                output.Length == 0 ? "下载运行环境失败，请检查网络" : output,
+                                "下载运行环境失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
                     }));
                 });
                 return;
