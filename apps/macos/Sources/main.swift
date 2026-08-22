@@ -89,9 +89,17 @@ enum ExecutableResolver {
     static func findInDirs(_ name: String) -> String? {
         for dir in candidateDirs() {
             let candidate = "\(dir)/\(name)"
-            if FileManager.default.isExecutableFile(atPath: candidate) {
-                return candidate
+            guard FileManager.default.isExecutableFile(atPath: candidate) else { continue }
+            // Skip shell-wrapper shims (e.g. ~/.local/bin/dsh) that are not
+            // Node-entry JS files. The shell launches dsh through node, so a
+            // `#!/bin/sh` wrapper would be parsed as JavaScript and fail.
+            if let content = try? String(contentsOfFile: candidate, encoding: .utf8) {
+                let shebang = content.components(separatedBy: .newlines).first ?? ""
+                if shebang.hasPrefix("#!") && (shebang.contains("/sh") || shebang.contains("bash") || shebang.contains("zsh") || shebang.contains("pwsh")) {
+                    continue
+                }
             }
+            return candidate
         }
         return nil
     }
@@ -899,13 +907,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         alert.messageText = "DeepSeek Harness 无法启动服务"
         alert.informativeText = message
         alert.alertStyle = .critical
+        alert.addButton(withTitle: "更新内核")
         alert.addButton(withTitle: "重启")
         alert.addButton(withTitle: "打开日志")
         alert.addButton(withTitle: "退出")
         switch alert.runModal() {
         case .alertFirstButtonReturn:
-            ServerController.shared.restart()
+            updateCore(nil)
         case .alertSecondButtonReturn:
+            ServerController.shared.restart()
+        case .alertThirdButtonReturn:
             openLogs(nil)
         default:
             NSApp.terminate(nil)
