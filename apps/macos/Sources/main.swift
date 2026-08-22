@@ -681,16 +681,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let hasBundledDsh = (Bundle.main.resourceURL?.appendingPathComponent("dsh").path)
             .map { FileManager.default.fileExists(atPath: $0) } ?? false
         if managedCoreDSHPath() == nil && !hasBundledDsh {
-            _ = parseUpdateOutput(runUpdater(arguments: ["bootstrap"]))
-        }
-        if !ServerController.shared.resolvePaths() {
-            let bootstrap = parseUpdateOutput(runUpdater(arguments: ["bootstrap"]))
-            if bootstrap["BOOTSTRAP_OK"] == "1" {
-                _ = ServerController.shared.resolvePaths()
+            statusLabel?.stringValue = "正在下载运行环境…"
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let output = self?.runUpdater(arguments: ["bootstrap"]) ?? ""
+                DispatchQueue.main.async {
+                    if parseUpdateOutput(output)["BOOTSTRAP_OK"] == "1" {
+                        _ = ServerController.shared.resolvePaths()
+                    }
+                    ServerController.shared.recoverStaleServer()
+                    ServerController.shared.start()
+                }
             }
+        } else {
+            if !ServerController.shared.resolvePaths() {
+                let bootstrap = parseUpdateOutput(runUpdater(arguments: ["bootstrap"]))
+                if bootstrap["BOOTSTRAP_OK"] == "1" {
+                    _ = ServerController.shared.resolvePaths()
+                }
+            }
+            ServerController.shared.recoverStaleServer()
+            ServerController.shared.start()
         }
-        ServerController.shared.recoverStaleServer()
-        ServerController.shared.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

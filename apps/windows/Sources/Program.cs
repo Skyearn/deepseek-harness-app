@@ -679,8 +679,26 @@ namespace DeepSeekHarness
                 "dsh", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js"));
             if (!hasBundledDsh && !RuntimeComplete())
             {
-                RunUpdater("bootstrap");
+                statusLabel.Text = "正在下载运行环境…";
+                ThreadPool.QueueUserWorkItem(delegate
+                {
+                    string output = RunUpdater("bootstrap");
+                    BeginInvoke((Action)(delegate
+                    {
+                        if (ParseUpdateOutput(output).ContainsKey("BOOTSTRAP_OK"))
+                        {
+                            server.Resolve();
+                        }
+                        StartServerAfterResolve();
+                    }));
+                });
+                return;
             }
+            StartServerAfterResolve();
+        }
+
+        private void StartServerAfterResolve()
+        {
             server.Resolve();
             if (server.DshPath.Length == 0 || server.NodePath.Length == 0)
             {
