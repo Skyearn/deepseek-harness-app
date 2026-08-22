@@ -11,7 +11,7 @@ trap 'rm -rf "$WORK"' EXIT
 
 mkdir -p "$WORK/runtime"
 echo "==> Installing @deepseek-ai/dsh@${DSH_VERSION}"
-npm install --prefix "$WORK/runtime" --no-audit --no-fund "@deepseek-ai/dsh@${DSH_VERSION}"
+npm install --prefix "$WORK/runtime" --no-audit --no-fund --prefer-offline "@deepseek-ai/dsh@${DSH_VERSION}"
 
 mkdir -p "$WORK/runtime/versions/${DSH_VERSION}"
 mv "$WORK/runtime/node_modules" "$WORK/runtime/versions/${DSH_VERSION}/node_modules"

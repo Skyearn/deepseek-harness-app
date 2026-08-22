@@ -305,7 +305,7 @@ async function updateCore() {
   // included in the tarball, so extracting it alone is not runnable.
   emitLine('STATUS=正在安装 DSH 内核…')
     const npmLogPath = join(runtimeDir, 'npm-install.log')
-    runWithLog(npm, ['install', '--prefix', temp, '--no-audit', '--no-fund', `${NPM_PACKAGE}@${version}`], npmEnv, npmLogPath)
+    runWithLog(npm, ['install', '--prefix', temp, '--no-audit', '--no-fund', '--prefer-offline', `${NPM_PACKAGE}@${version}`], npmEnv, npmLogPath)
 
   if (!existsSync(join(temp, 'node_modules', NPM_PACKAGE, 'lib', 'bin.js'))) {
     throw new Error('npm install did not produce the expected dsh CLI entry')
