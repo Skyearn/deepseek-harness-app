@@ -13,7 +13,7 @@ import https from 'node:https'
 import { createWriteStream, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, renameSync, writeFileSync, openSync, closeSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { join, dirname } from 'node:path'
+import { join, dirname, basename } from 'node:path'
 
 const REPO = 'Skyearn/deepseek-harness-app'
 const NPM_PACKAGE = '@deepseek-ai/dsh'
@@ -241,6 +241,18 @@ async function shellLatest() {
   }
 }
 
+async function runtimeBundleUrl() {
+  const release = await requestJSON(`https://api.github.com/repos/${REPO}/releases/latest`)
+  if (!Array.isArray(release.assets)) return ''
+  const wanted = isWindows ? 'windows-x64' : 'macos-universal'
+  const asset = release.assets.find(item =>
+    item.name?.startsWith('dsh-runtime-') &&
+    item.name.includes(wanted) &&
+    (item.name.endsWith('.tar.gz') || item.name.endsWith('.zip'))
+  )
+  return asset?.browser_download_url || ''
+}
+
 function output(entries) {
   for (const [key, value] of entries) {
     process.stdout.write(`${key}=${value}\n`)
@@ -305,6 +317,47 @@ async function updateCore() {
   output([['CORE_VERSION', version], ['CORE_UPDATED', '1']])
 }
 
+async function bootstrap() {
+  const url = await runtimeBundleUrl()
+  if (url) {
+    const archiveName = basename(url)
+    const archive = join(downloadsDir, archiveName)
+    emitLine('STATUS=正在下载预构建运行环境…')
+    await download(url, archive)
+
+    emitLine('STATUS=正在解压预构建运行环境…')
+    const temp = join(runtimeDir, '.prebuilt-tmp')
+    rmSync(temp, { recursive: true, force: true })
+    mkdirSync(temp, { recursive: true })
+    const tar = isWindows ? 'tar.exe' : 'tar'
+    run(tar, ['-xf', archive, '-C', temp])
+
+    const sourceRoot = existsSync(join(temp, 'runtime', 'current')) ? join(temp, 'runtime') : temp
+    if (!existsSync(join(sourceRoot, 'current')) || !existsSync(join(sourceRoot, 'node'))) {
+      throw new Error('prebuilt runtime archive has an unexpected layout')
+    }
+
+    rmSync(join(runtimeDir, 'node'), { recursive: true, force: true })
+    rmSync(join(runtimeDir, 'versions'), { recursive: true, force: true })
+    rmSync(join(runtimeDir, 'current'), { recursive: true, force: true })
+    for (const name of ['node', 'versions', 'current']) {
+      if (existsSync(join(sourceRoot, name))) {
+        renameSync(join(sourceRoot, name), join(runtimeDir, name))
+      }
+    }
+    if (!existsSync(nodeExecutablePath()) || !existsSync(currentFile)) {
+      throw new Error('prebuilt runtime is incomplete')
+    }
+    const version = readCurrentCoreVersion()
+    if (version && !existsSync(join(currentCoreDir(version), COMPLETE_MARKER))) {
+      throw new Error('prebuilt runtime missing .complete marker')
+    }
+    output([['CORE_VERSION', version || ''], ['CORE_UPDATED', '1']])
+  } else {
+    await updateCore()
+  }
+}
+
 async function downloadShell() {
   const shell = await shellLatest()
   if (!shell.assetUrl) throw new Error('no shell asset found in the latest release')
@@ -322,7 +375,7 @@ try {
   if (command === 'check') await check()
   else if (command === 'update-core') await updateCore()
   else if (command === 'bootstrap') {
-    await updateCore()
+    await bootstrap()
     output([['BOOTSTRAP_OK', '1']])
   }
   else if (command === 'download-shell') await downloadShell()
