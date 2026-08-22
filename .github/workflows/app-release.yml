@@ -202,10 +202,54 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  build-runtime-macos:
+    name: Build runtime bundle (macOS)
+    needs: []
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Derive dsh version
+        id: version
+        run: echo "dsh=$(cat apps/dsh-version)" >> "$GITHUB_OUTPUT"
+      - name: Build runtime bundle
+        run: bash scripts/build-runtime-macos.sh "${{ steps.version.outputs.dsh }}" dist/dsh-runtime-${{ steps.version.outputs.dsh }}-macos-universal.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-runtime-macos
+          path: dist/dsh-runtime-*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  build-runtime-windows:
+    name: Build runtime bundle (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Derive dsh version
+        id: version
+        shell: bash
+        run: echo "dsh=$(cat apps/dsh-version)" >> "$GITHUB_OUTPUT"
+      - name: Build runtime bundle
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts/build-runtime-windows.ps1 -DshVersion "${{ steps.version.outputs.dsh }}" -Out "dist/dsh-runtime-${{ steps.version.outputs.dsh }}-windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-runtime-windows
+          path: dist/dsh-runtime-*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+
   publish:
     name: Publish to GitHub Release
     if: ${{ github.event_name == 'push' && github.ref_type == 'tag' || inputs.publish }}
-    needs: [build-macos, build-windows]
+    needs: [build-macos, build-windows, build-runtime-macos, build-runtime-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -224,6 +268,12 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dsh-runtime-*
+          path: dist
+          merge-multiple: true
+
       - name: Attach the apps to the Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -235,8 +285,8 @@ jobs:
           TAG="$GITHUB_REF_NAME"
           VERSION="${TAG#app-v}"
           DSH_VERSION="$(cat apps/dsh-version)"
-          if [[ -z "$(ls dist/*.zip 2>/dev/null)" ]]; then
-            echo "::error::no platform zip assets found under dist/"
+          if [[ -z "$(ls dist/*.zip dist/*.tar.gz 2>/dev/null)" ]]; then
+            echo "::error::no platform/runtime assets found under dist/"
             exit 1
           fi
           NOTES="DeepSeek Harness ${VERSION} for macOS (universal binary: Apple Silicon + Intel) and Windows (x64)."
@@ -244,9 +294,9 @@ jobs:
           NOTES+=$'\n- Each app launches `dsh web` unchanged and releases its port on quit.'
           NOTES+=$'\n- macOS builds are signed ad-hoc (not notarized): if Gatekeeper objects on first launch, right-click the app and choose Open.'
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/*.zip --clobber
+            gh release upload "$TAG" dist/*.zip dist/*.tar.gz --clobber
           else
-            gh release create "$TAG" dist/*.zip --title "DeepSeek Harness ${VERSION}" --notes "$NOTES"
+            gh release create "$TAG" dist/*.zip dist/*.tar.gz --title "DeepSeek Harness ${VERSION}" --notes "$NOTES"
           fi
           # A tag deleted and recreated (tag moves) leaves the release untagged
           # and draft; publish it so the asset is visible.
