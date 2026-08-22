@@ -660,6 +660,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var lastFailure: String?
     private var showStatusBarItem: NSMenuItem?
     private var progressIndicator: NSProgressIndicator?
+    private var bootstrapOverlay: NSView?
+    private var bootstrapLabel: NSTextField?
+    private var bootstrapProgress: NSProgressIndicator?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installSignalHandlers()
@@ -682,9 +685,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let hasBundledDsh = (Bundle.main.resourceURL?.appendingPathComponent("dsh").path)
             .map { FileManager.default.fileExists(atPath: $0) } ?? false
         if managedCoreDSHPath() == nil && !hasBundledDsh {
-            statusLabel?.stringValue = "正在下载运行环境…"
-            progressIndicator?.doubleValue = 0
-            progressIndicator?.isHidden = false
+            bootstrapOverlay?.isHidden = false
+            bootstrapLabel?.stringValue = "正在下载运行环境…"
+            bootstrapProgress?.doubleValue = 0
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 let output = self?.runUpdaterStreaming(arguments: ["bootstrap"], timeout: 1800) { progress in
                     DispatchQueue.main.async {
@@ -694,17 +697,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                            let total = Double(progress[progress.index(after: slash)...]),
                            total > 0 {
                             let ratio = min(done / total, 1)
-                            self.progressIndicator?.doubleValue = ratio
-                            self.statusLabel?.stringValue = "正在下载运行环境… \(Int(ratio * 100))%"
+                            self.bootstrapProgress?.doubleValue = ratio
+                            self.bootstrapLabel?.stringValue = "正在下载运行环境… \(Int(ratio * 100))%"
                         } else {
-                            self.statusLabel?.stringValue = progress
+                            self.bootstrapLabel?.stringValue = progress
                         }
                     }
                 } ?? ""
                 DispatchQueue.main.async {
-                    self?.progressIndicator?.isHidden = true
+                    self?.bootstrapOverlay?.isHidden = true
                     if self?.parseUpdateOutput(output)["BOOTSTRAP_OK"] == "1" {
-                        self?.progressIndicator?.doubleValue = 1
                         _ = ServerController.shared.resolvePaths()
                         ServerController.shared.recoverStaleServer()
                         ServerController.shared.start()
@@ -885,6 +887,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         bar.addSubview(progress)
         progressIndicator = progress
 
+        let overlay = NSView()
+        overlay.wantsLayer = true
+        overlay.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        overlay.isHidden = true
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(overlay)
+        bootstrapOverlay = overlay
+
+        let overlayLabel = NSTextField(labelWithString: "正在下载运行环境…")
+        overlayLabel.font = .systemFont(ofSize: 16, weight: .medium)
+        overlayLabel.alignment = .center
+        overlayLabel.translatesAutoresizingMaskIntoConstraints = false
+        overlay.addSubview(overlayLabel)
+        bootstrapLabel = overlayLabel
+
+        let overlayProgress = NSProgressIndicator()
+        overlayProgress.style = .bar
+        overlayProgress.controlSize = .regular
+        overlayProgress.isIndeterminate = false
+        overlayProgress.minValue = 0
+        overlayProgress.maxValue = 1
+        overlayProgress.doubleValue = 0
+        overlayProgress.translatesAutoresizingMaskIntoConstraints = false
+        overlay.addSubview(overlayProgress)
+        bootstrapProgress = overlayProgress
+
         let webBottom = web.bottomAnchor.constraint(equalTo: bar.topAnchor)
 
         NSLayoutConstraint.activate([
@@ -904,6 +932,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             progressIndicator!.heightAnchor.constraint(equalToConstant: 10),
             urlField.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -12),
             urlField.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            bootstrapOverlay!.topAnchor.constraint(equalTo: content.topAnchor),
+            bootstrapOverlay!.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            bootstrapOverlay!.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            bootstrapOverlay!.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            bootstrapLabel!.centerXAnchor.constraint(equalTo: bootstrapOverlay!.centerXAnchor),
+            bootstrapLabel!.centerYAnchor.constraint(equalTo: bootstrapOverlay!.centerYAnchor, constant: -12),
+            bootstrapProgress!.topAnchor.constraint(equalTo: bootstrapLabel!.bottomAnchor, constant: 12),
+            bootstrapProgress!.centerXAnchor.constraint(equalTo: bootstrapOverlay!.centerXAnchor),
+            bootstrapProgress!.widthAnchor.constraint(equalToConstant: 320),
+            bootstrapProgress!.heightAnchor.constraint(equalToConstant: 12),
         ])
 
         self.webView = web
