@@ -17,6 +17,7 @@ import { join, dirname } from 'node:path'
 
 const REPO = 'Skyearn/deepseek-harness-app'
 const NPM_PACKAGE = '@deepseek-ai/dsh'
+const COMPLETE_MARKER = '.complete'
 
 const isWindows = process.platform === 'win32'
 const home = process.env.HOME || process.env.USERPROFILE || tmpdir()
@@ -82,6 +83,21 @@ function run(command, args) {
   return result.stdout
 }
 
+function findNpm() {
+  const candidates = isWindows
+    ? ['npm.cmd', 'npm', 'C:\\Program Files\\nodejs\\npm.cmd', `${process.env.APPDATA}\\npm\\npm.cmd`]
+    : ['npm', '/opt/homebrew/bin/npm', '/usr/local/bin/npm', '/usr/bin/npm']
+  for (const candidate of candidates) {
+    try {
+      run(candidate, ['--version'])
+      return candidate
+    } catch {
+      // try the next location
+    }
+  }
+  throw new Error('npm not found; cannot install core dependencies')
+}
+
 function extractTgz(tgz, dest) {
   mkdirSync(dest, { recursive: true })
   const tar = isWindows ? 'tar.exe' : 'tar'
@@ -104,9 +120,10 @@ function currentCoreDir(version) {
 function coreEntryPath() {
   const version = readCurrentCoreVersion()
   if (!version) return null
-  const pkg = join(currentCoreDir(version), 'package', 'bin', 'dsh')
-  const lib = join(currentCoreDir(version), 'package', 'lib', 'bin.js')
-  return existsSync(pkg) ? pkg : existsSync(lib) ? lib : null
+  const root = currentCoreDir(version)
+  if (!existsSync(join(root, COMPLETE_MARKER))) return null
+  const npmLib = join(root, 'node_modules', NPM_PACKAGE, 'lib', 'bin.js')
+  return existsSync(npmLib) ? npmLib : null
 }
 
 async function coreLatest() {
@@ -166,25 +183,30 @@ async function updateCore() {
   const version = latest.version
   const dest = currentCoreDir(version)
 
-  if (existsSync(join(dest, 'package'))) {
+  const installedEntry = join(dest, 'node_modules', NPM_PACKAGE, 'lib', 'bin.js')
+  if (existsSync(installedEntry) && existsSync(join(dest, COMPLETE_MARKER))) {
     writeFileSync(currentFile, version)
     output([['CORE_VERSION', version], ['CORE_UPDATED', '1']])
     return
   }
 
-  const tgz = join(downloadsDir, `dsh-${version}.tgz`)
-  await download(latest.tarball, tgz)
-
+  const npm = findNpm()
   const temp = join(versionsDir, `.tmp-${version}`)
   rmSync(temp, { recursive: true, force: true })
-  extractTgz(tgz, temp)
+  mkdirSync(temp, { recursive: true })
 
-  if (!existsSync(join(temp, 'package', 'lib', 'bin.js')) && !existsSync(join(temp, 'package', 'bin', 'dsh'))) {
-    throw new Error('downloaded dsh package has an unexpected layout')
+  // npm install creates the full dependency tree. The published @deepseek-ai/dsh
+  // tarball is only the CLI entry package; its workspace dependencies are not
+  // included in the tarball, so extracting it alone is not runnable.
+  run(npm, ['install', '--prefix', temp, '--no-audit', '--no-fund', `${NPM_PACKAGE}@${version}`])
+
+  if (!existsSync(join(temp, 'node_modules', NPM_PACKAGE, 'lib', 'bin.js'))) {
+    throw new Error('npm install did not produce the expected dsh CLI entry')
   }
 
   rmSync(dest, { recursive: true, force: true })
   renameSync(temp, dest)
+  writeFileSync(join(dest, COMPLETE_MARKER), version)
   writeFileSync(currentFile, version)
   output([['CORE_VERSION', version], ['CORE_UPDATED', '1']])
 }

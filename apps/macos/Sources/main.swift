@@ -111,14 +111,11 @@ func managedCoreDSHPath() -> String? {
     guard let current = try? String(contentsOf: Paths.runtimeCurrent, encoding: .utf8) else { return nil }
     let version = current.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !version.isEmpty else { return nil }
-    let package = Paths.runtimeVersions
-        .appendingPathComponent(version, isDirectory: true)
-        .appendingPathComponent("package", isDirectory: true)
-    let lib = package.appendingPathComponent("lib/bin.js").path
-    let bin = package.appendingPathComponent("bin/dsh").path
-    if FileManager.default.fileExists(atPath: lib) { return lib }
-    if FileManager.default.fileExists(atPath: bin) { return bin }
-    return nil
+    let root = Paths.runtimeVersions.appendingPathComponent(version, isDirectory: true)
+    let marker = root.appendingPathComponent(".complete")
+    guard FileManager.default.fileExists(atPath: marker.path) else { return nil }
+    let installed = root.appendingPathComponent("node_modules/@deepseek-ai/dsh/lib/bin.js").path
+    return FileManager.default.fileExists(atPath: installed) ? installed : nil
 }
 
 /// The dsh executable, in order: the `dshPath` preference, the runtime install

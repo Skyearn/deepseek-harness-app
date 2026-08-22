@@ -194,11 +194,10 @@ namespace DeepSeekHarness
                 if (File.Exists(currentFile))
                 {
                     string version = File.ReadAllText(currentFile).Trim();
-                    string pkg = Path.Combine(Settings.StatePath(), "runtime", "versions", version, "package");
-                    string libBin = Path.Combine(pkg, "lib", "bin.js");
-                    string dshBin = Path.Combine(pkg, "bin", "dsh");
-                    if (File.Exists(libBin)) return libBin;
-                    if (File.Exists(dshBin)) return dshBin;
+                    string root = Path.Combine(Settings.StatePath(), "runtime", "versions", version);
+                    string installed = Path.Combine(root, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
+                    string marker = Path.Combine(root, ".complete");
+                    if (File.Exists(marker) && File.Exists(installed)) return installed;
                 }
             }
             catch (Exception)
