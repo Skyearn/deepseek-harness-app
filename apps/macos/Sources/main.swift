@@ -732,9 +732,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         appMenu.addItem(withTitle: "打开浏览器", action: #selector(openBrowser(_:)), keyEquivalent: "b")
         appMenu.addItem(withTitle: "重启服务", action: #selector(restartServer(_:)), keyEquivalent: "r")
         appMenu.addItem(withTitle: "打开日志", action: #selector(openLogs(_:)), keyEquivalent: "l")
-        appMenu.addItem(withTitle: "检查更新…", action: #selector(checkUpdates(_:)), keyEquivalent: "u")
-        appMenu.addItem(withTitle: "更新内核", action: #selector(updateCore(_:)), keyEquivalent: "")
-        appMenu.addItem(withTitle: "下载壳更新", action: #selector(downloadShellUpdate(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         let toggleStatusBar = NSMenuItem(title: "",
                                          action: #selector(toggleStatusBar(_:)), keyEquivalent: "")
@@ -755,6 +752,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         appMenu.addItem(withTitle: "退出 DeepSeek Harness",
                         action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
+
+        // Update menu — keeps shell/core update actions out of the app menu.
+        let updateItem = NSMenuItem()
+        mainMenu.addItem(updateItem)
+        let updateMenu = NSMenu(title: "更新")
+        updateMenu.addItem(withTitle: "检查更新…", action: #selector(checkUpdates(_:)), keyEquivalent: "u")
+        updateMenu.addItem(withTitle: "更新内核", action: #selector(updateCore(_:)), keyEquivalent: "")
+        updateMenu.addItem(withTitle: "下载壳更新", action: #selector(downloadShellUpdate(_:)), keyEquivalent: "")
+        updateMenu.addItem(.separator())
+        updateMenu.addItem(withTitle: "打开更新目录",
+                           action: #selector(openUpdateDirectory(_:)), keyEquivalent: "")
+        updateItem.submenu = updateMenu
 
         // Edit menu — routes undo/redo/cut/copy/paste/select-all through the
         // responder chain (nil target) so the web view's field editor receives
@@ -1021,6 +1030,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             alert.addButton(withTitle: "好")
             alert.runModal()
         }
+    }
+
+    @objc private func openUpdateDirectory(_ sender: Any?) {
+        Paths.ensure(Paths.runtime)
+        NSWorkspace.shared.open(Paths.runtime)
     }
 
     // MARK: Status bar

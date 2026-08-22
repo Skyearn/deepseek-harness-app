@@ -594,15 +594,23 @@ namespace DeepSeekHarness
             restartButton.Enabled = false;
             restartButton.Click += delegate { Restart(); };
 
-            Button updateButton = new Button();
-            updateButton.Text = "检查更新";
-            updateButton.Width = 90;
-            updateButton.Click += delegate { CheckUpdates(); };
+            ContextMenuStrip updateMenu = new ContextMenuStrip();
+            ToolStripMenuItem checkItem = new ToolStripMenuItem("检查更新…");
+            checkItem.Click += delegate { CheckUpdates(); };
+            ToolStripMenuItem coreItem = new ToolStripMenuItem("更新内核");
+            coreItem.Click += delegate { UpdateCore(); };
+            ToolStripMenuItem shellItem = new ToolStripMenuItem("下载壳更新");
+            shellItem.Click += delegate { DownloadShellUpdate(); };
+            ToolStripMenuItem updateDirItem = new ToolStripMenuItem("打开更新目录");
+            updateDirItem.Click += delegate { OpenUpdateDirectory(); };
+            updateMenu.Items.AddRange(new ToolStripItem[] {
+                checkItem, coreItem, shellItem, new ToolStripSeparator(), updateDirItem
+            });
 
-            Button coreButton = new Button();
-            coreButton.Text = "更新内核";
-            coreButton.Width = 90;
-            coreButton.Click += delegate { UpdateCore(); };
+            Button updateButton = new Button();
+            updateButton.Text = "更新";
+            updateButton.Width = 80;
+            updateButton.Click += delegate { updateMenu.Show(updateButton, new Point(0, updateButton.Height)); };
 
             Button logsButton = new Button();
             logsButton.Text = "打开日志";
@@ -617,7 +625,6 @@ namespace DeepSeekHarness
             buttons.Controls.Add(openButton);
             buttons.Controls.Add(restartButton);
             buttons.Controls.Add(updateButton);
-            buttons.Controls.Add(coreButton);
             buttons.Controls.Add(logsButton);
             buttons.Controls.Add(quitButton);
             bar.Controls.Add(buttons);
@@ -870,6 +877,36 @@ namespace DeepSeekHarness
             {
                 MessageBox.Show(this, output.Length == 0 ? "更新失败，请检查网络" : output, "内核更新失败",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void DownloadShellUpdate()
+        {
+            string output = RunUpdater("download-shell");
+            Dictionary<string, string> info = ParseUpdateOutput(output);
+            if (Get(info, "SHELL_DOWNLOADED", "") == "1")
+            {
+                string path = Get(info, "SHELL_DOWNLOAD", Settings.StatePath());
+                Directory.CreateDirectory(path);
+                Process.Start("explorer.exe", path);
+            }
+            else
+            {
+                MessageBox.Show(this, output.Length == 0 ? "下载失败，请检查网络" : output, "壳更新下载失败",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void OpenUpdateDirectory()
+        {
+            string runtimeDir = Path.Combine(Settings.StatePath(), "runtime");
+            try
+            {
+                Directory.CreateDirectory(runtimeDir);
+                Process.Start("explorer.exe", runtimeDir);
+            }
+            catch (Exception)
+            {
             }
         }
 
