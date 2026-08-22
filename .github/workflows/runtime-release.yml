@@ -55,7 +55,7 @@ jobs:
         with:
           node-version: 24
       - name: Build runtime bundle
-        run: bash scripts/build-runtime-macos.sh "${{ needs.detect.outputs.dsh_version }}" dist/dsh-runtime-${{ needs.detect.outputs.dsh_version }}-macos-universal.tar.gz
+        run: bash scripts/build-runtime-macos.sh "${{ needs.detect.outputs.dsh_version }}" "" "dist/dsh-runtime-${{ needs.detect.outputs.dsh_version }}-macos-universal.tar.gz"
       - uses: actions/upload-artifact@v4
         with:
           name: dsh-runtime-macos
