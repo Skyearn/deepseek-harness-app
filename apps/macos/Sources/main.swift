@@ -659,16 +659,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var signalSources: [DispatchSourceSignal] = []
     private var lastFailure: String?
     private var showStatusBarItem: NSMenuItem?
-    private var appearanceObservation: NSKeyValueObservation?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installSignalHandlers()
         buildMenu()
         buildWindow()
-        updateAppIconForAppearance()
-        appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.initial, .new]) { [weak self] _, _ in
-            DispatchQueue.main.async { self?.updateAppIconForAppearance() }
-        }
 
         ServerController.shared.onStateChange = { [weak self] in self?.refreshUI() }
         refreshUI()
@@ -1055,14 +1050,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func openUpdateDirectory(_ sender: Any?) {
         Paths.ensure(Paths.runtime)
         NSWorkspace.shared.open(Paths.runtime)
-    }
-
-    private func updateAppIconForAppearance() {
-        let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let iconName = isDark ? "AppIcon" : "AppIcon-Light"
-        guard let url = Bundle.main.resourceURL?.appendingPathComponent("\(iconName).icns"),
-              let image = NSImage(contentsOf: url) else { return }
-        NSApp.applicationIconImage = image
     }
 
     // MARK: Status bar
