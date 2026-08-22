@@ -13,7 +13,7 @@
 	<key>CFBundleExecutable</key>
 	<string>DeepSeek Harness</string>
 	<key>CFBundleIconFile</key>
-	<string>AppIcon</string>
+	<string>AppIcon-Light</string>
 	<key>CFBundleIdentifier</key>
 	<string>ai.deepseek.harness</string>
 	<key>CFBundleInfoDictionaryVersion</key>
