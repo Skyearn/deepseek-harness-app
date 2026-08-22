@@ -241,12 +241,13 @@ async function shellLatest() {
   }
 }
 
-async function runtimeBundleUrl() {
+async function runtimeBundleUrl(shellCurrent) {
   const release = await requestJSON(`https://api.github.com/repos/${REPO}/releases/latest`)
   if (!Array.isArray(release.assets)) return ''
   const wanted = isWindows ? 'windows-x64' : 'macos-universal'
+  const prefix = shellCurrent ? `dsh-runtime-${shellCurrent}-` : 'dsh-runtime-'
   const asset = release.assets.find(item =>
-    item.name?.startsWith('dsh-runtime-') &&
+    item.name?.startsWith(prefix) &&
     item.name.includes(wanted) &&
     (item.name.endsWith('.tar.gz') || item.name.endsWith('.zip'))
   )
@@ -318,7 +319,7 @@ async function updateCore() {
 }
 
 async function bootstrap() {
-  const url = await runtimeBundleUrl()
+  const url = await runtimeBundleUrl(argValue('--shell-current') || '')
   if (url) {
     const archiveName = basename(url)
     const archive = join(downloadsDir, archiveName)

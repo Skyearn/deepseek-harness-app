@@ -204,18 +204,24 @@ jobs:
 
   build-runtime-macos:
     name: Build runtime bundle (macOS)
-    needs: []
+    if: ${{ github.event_name == 'push' && github.ref_type == 'tag' || inputs.publish }}
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-      - name: Derive dsh version
+      - name: Derive versions
         id: version
-        run: echo "dsh=$(cat apps/dsh-version)" >> "$GITHUB_OUTPUT"
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            echo "shell=${GITHUB_REF_NAME#app-v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "shell=$(cat apps/version)" >> "$GITHUB_OUTPUT"
+          fi
+          echo "dsh=$(cat apps/dsh-version)" >> "$GITHUB_OUTPUT"
       - name: Build runtime bundle
-        run: bash scripts/build-runtime-macos.sh "${{ steps.version.outputs.dsh }}" dist/dsh-runtime-${{ steps.version.outputs.dsh }}-macos-universal.tar.gz
+        run: bash scripts/build-runtime-macos.sh "${{ steps.version.outputs.dsh }}" "${{ steps.version.outputs.shell }}" dist/dsh-runtime-${{ steps.version.outputs.shell }}-${{ steps.version.outputs.dsh }}-macos-universal.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: dsh-runtime-macos
@@ -225,19 +231,26 @@ jobs:
 
   build-runtime-windows:
     name: Build runtime bundle (Windows)
+    if: ${{ github.event_name == 'push' && github.ref_type == 'tag' || inputs.publish }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-      - name: Derive dsh version
+      - name: Derive versions
         id: version
         shell: bash
-        run: echo "dsh=$(cat apps/dsh-version)" >> "$GITHUB_OUTPUT"
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            echo "shell=${GITHUB_REF_NAME#app-v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "shell=$(cat apps/version)" >> "$GITHUB_OUTPUT"
+          fi
+          echo "dsh=$(cat apps/dsh-version)" >> "$GITHUB_OUTPUT"
       - name: Build runtime bundle
         shell: pwsh
-        run: powershell -ExecutionPolicy Bypass -File scripts/build-runtime-windows.ps1 -DshVersion "${{ steps.version.outputs.dsh }}" -Out "dist/dsh-runtime-${{ steps.version.outputs.dsh }}-windows-x64.zip"
+        run: powershell -ExecutionPolicy Bypass -File scripts/build-runtime-windows.ps1 -DshVersion "${{ steps.version.outputs.dsh }}" -ShellVersion "${{ steps.version.outputs.shell }}" -Out "dist/dsh-runtime-${{ steps.version.outputs.shell }}-${{ steps.version.outputs.dsh }}-windows-x64.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: dsh-runtime-windows

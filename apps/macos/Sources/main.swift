@@ -689,7 +689,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             bootstrapLabel?.stringValue = "正在下载运行环境…"
             bootstrapProgress?.doubleValue = 0
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                let output = self?.runUpdaterStreaming(arguments: ["bootstrap"], timeout: 1800) { progress in
+                let output = self?.runUpdaterStreaming(arguments: ["bootstrap", "--shell-current", self?.shellVersion() ?? ""], timeout: 1800) { progress in
                     DispatchQueue.main.async {
                         guard let self else { return }
                         if let slash = progress.firstIndex(of: "/"),
@@ -719,7 +719,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         } else {
             if !ServerController.shared.resolvePaths() {
-                let bootstrap = parseUpdateOutput(runUpdater(arguments: ["bootstrap"], timeout: 1800))
+                let bootstrap = parseUpdateOutput(runUpdater(arguments: ["bootstrap", "--shell-current", shellVersion()], timeout: 1800))
                 if bootstrap["BOOTSTRAP_OK"] == "1" {
                     _ = ServerController.shared.resolvePaths()
                 }

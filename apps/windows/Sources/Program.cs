@@ -682,7 +682,7 @@ namespace DeepSeekHarness
                 statusLabel.Text = "正在下载运行环境…";
                 ThreadPool.QueueUserWorkItem(delegate
                 {
-                    string output = RunUpdater("bootstrap");
+                    string output = RunUpdater("bootstrap --shell-current \"" + ShellVersion() + "\"");
                     BeginInvoke((Action)(delegate
                     {
                         if (ParseUpdateOutput(output).ContainsKey("BOOTSTRAP_OK"))
@@ -708,7 +708,7 @@ namespace DeepSeekHarness
             server.Resolve();
             if (server.DshPath.Length == 0 || server.NodePath.Length == 0)
             {
-                string bootstrapOutput = RunUpdater("bootstrap");
+                string bootstrapOutput = RunUpdater("bootstrap --shell-current \"" + ShellVersion() + "\"");
                 if (ParseUpdateOutput(bootstrapOutput).ContainsKey("BOOTSTRAP_OK"))
                 {
                     server.Resolve();

@@ -1,10 +1,11 @@
 param(
   [Parameter(Mandatory=$true)][string]$DshVersion,
+  [Parameter(Mandatory=$true)][string]$ShellVersion,
   [string]$NodeVersion = 'v24.12.0',
   [string]$Out = ''
 )
 $ErrorActionPreference = 'Stop'
-if (-not $Out) { $Out = "dist\dsh-runtime-$DshVersion-windows-x64.zip" }
+if (-not $Out) { $Out = "dist\dsh-runtime-$ShellVersion-$DshVersion-windows-x64.zip" }
 
 $Work = Join-Path $env:TEMP ("dsh-runtime-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force $Work | Out-Null
