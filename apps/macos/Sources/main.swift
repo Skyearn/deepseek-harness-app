@@ -683,14 +683,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             .map { FileManager.default.fileExists(atPath: $0) } ?? false
         if managedCoreDSHPath() == nil && !hasBundledDsh {
             statusLabel?.stringValue = "正在下载运行环境…"
-            progressIndicator?.startAnimation(nil)
+            progressIndicator?.doubleValue = 0
+            progressIndicator?.isHidden = false
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 let output = self?.runUpdaterStreaming(arguments: ["bootstrap"], timeout: 1800) { progress in
-                    DispatchQueue.main.async { self?.statusLabel?.stringValue = progress }
+                    DispatchQueue.main.async {
+                        guard let self else { return }
+                        if let slash = progress.firstIndex(of: "/"),
+                           let done = Double(progress[..<slash]),
+                           let total = Double(progress[progress.index(after: slash)...]),
+                           total > 0 {
+                            let ratio = min(done / total, 1)
+                            self.progressIndicator?.doubleValue = ratio
+                            self.statusLabel?.stringValue = "正在下载运行环境… \(Int(ratio * 100))%"
+                        } else {
+                            self.statusLabel?.stringValue = progress
+                        }
+                    }
                 } ?? ""
                 DispatchQueue.main.async {
-                    self?.progressIndicator?.stopAnimation(nil)
+                    self?.progressIndicator?.isHidden = true
                     if self?.parseUpdateOutput(output)["BOOTSTRAP_OK"] == "1" {
+                        self?.progressIndicator?.doubleValue = 1
                         _ = ServerController.shared.resolvePaths()
                         ServerController.shared.recoverStaleServer()
                         ServerController.shared.start()
@@ -859,10 +873,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         bar.addSubview(urlField)
 
         let progress = NSProgressIndicator()
-        progress.style = .spinning
+        progress.style = .bar
         progress.controlSize = .small
-        progress.isIndeterminate = true
+        progress.isIndeterminate = false
+        progress.minValue = 0
+        progress.maxValue = 1
+        progress.doubleValue = 0
         progress.isDisplayedWhenStopped = false
+        progress.isHidden = true
         progress.translatesAutoresizingMaskIntoConstraints = false
         bar.addSubview(progress)
         progressIndicator = progress
@@ -882,8 +900,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             statusLabel.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             progressIndicator!.leadingAnchor.constraint(equalTo: statusLabel.trailingAnchor, constant: 8),
             progressIndicator!.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
-            progressIndicator!.widthAnchor.constraint(equalToConstant: 16),
-            progressIndicator!.heightAnchor.constraint(equalToConstant: 16),
+            progressIndicator!.widthAnchor.constraint(equalToConstant: 120),
+            progressIndicator!.heightAnchor.constraint(equalToConstant: 10),
             urlField.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -12),
             urlField.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
         ])
