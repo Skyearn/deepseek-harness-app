@@ -95,11 +95,12 @@ elif command -v rsvg-convert >/dev/null 2>&1 && command -v iconutil >/dev/null 2
   mkdir -p "${WORK}/AppIcon.iconset"
   path_data="$(sed -n 's/.* d="\([^"]*\)".*/\1/p' "${REPO_ROOT}/apps/web/public/favicon.svg")"
   # The mark's source bbox is x[0.53,49.37] y[6.94,43.58] (center 24.95,25.26);
-  # scale 0.70 about that center lands it at ~67% width with ~17/25% margins.
+  # inset the rounded square by 10% and scale the mark to 0.62 so the Dock
+  # icon has the same visual margin as standard macOS app icons.
   cat > "${WORK}/app-icon.svg" <<EOF
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 50 50">
-  <rect width="50" height="50" rx="11" fill="#0d1526"/>
-  <g transform="translate(25 25) scale(0.70) translate(-24.95 -25.26)">
+  <rect x="5" y="5" width="40" height="40" rx="9" fill="#0d1526"/>
+  <g transform="translate(25 25) scale(0.62) translate(-24.95 -25.26)">
     <path fill="#ffffff" d="${path_data}"/>
   </g>
 </svg>

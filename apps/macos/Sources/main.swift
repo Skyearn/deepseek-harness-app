@@ -1045,6 +1045,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard let url = Bundle.main.resourceURL?.appendingPathComponent("\(iconName).icns"),
               let image = NSImage(contentsOf: url) else { return }
         NSApp.applicationIconImage = image
+        // Best effort: also update the Finder/Applications icon for the
+        // current appearance. Finder may cache icons; this is a soft refresh.
+        NSWorkspace.shared.setIcon(image, forFile: Bundle.main.bundlePath, options: [])
     }
 
     // MARK: Status bar
