@@ -225,7 +225,11 @@ async function coreLatest() {
 }
 
 async function shellLatest() {
-  const release = await requestJSON(`https://api.github.com/repos/${REPO}/releases/latest`)
+  const releases = await requestJSON(`https://api.github.com/repos/${REPO}/releases?per_page=20`)
+  const release = (Array.isArray(releases) ? releases : []).find(item => item.tag_name?.startsWith('app-v'))
+  if (!release) {
+    return { version: '', url: '', assetUrl: '' }
+  }
   const tag = release.tag_name || ''
   const version = tag.startsWith('app-v') ? tag.slice(5) : tag
   let assetUrl = ''
