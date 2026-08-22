@@ -148,4 +148,4 @@ jobs:
           registry=https://npm.pkg.github.com
           EOF
           cd "$PKG_DIR"
-          npm publish --access public
+          npm publish --access public --tag next
