@@ -62,6 +62,8 @@ if ($LASTEXITCODE -ne 0) { throw "csc failed with exit code $LASTEXITCODE" }
 # --- Update helper --------------------------------------------------------------
 Copy-Item (Join-Path $scriptDir '..\updater\updater.mjs') (Join-Path $outDir 'updater.mjs')
 Copy-Item (Join-Path $scriptDir '..\version') (Join-Path $outDir 'version.txt')
+Copy-Item (Join-Path $scriptDir 'Resources\app.ico') (Join-Path $outDir 'app.ico')
+Copy-Item (Join-Path $scriptDir 'Resources\AppIcon-Light.ico') (Join-Path $outDir 'app-light.ico')
 
 if ($BundleDsh) {
   $dshDir = Join-Path $outDir 'dsh'

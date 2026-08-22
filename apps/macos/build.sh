@@ -87,6 +87,9 @@ cp "${REPO_ROOT}/apps/version" "${RES_DIR}/version.txt"
 if [[ -f "${SCRIPT_DIR}/Resources/AppIcon.icns" ]]; then
   echo "==> Using committed AppIcon.icns"
   cp "${SCRIPT_DIR}/Resources/AppIcon.icns" "${RES_DIR}/AppIcon.icns"
+    if [[ -f "${SCRIPT_DIR}/Resources/AppIcon-Light.icns" ]]; then
+      cp "${SCRIPT_DIR}/Resources/AppIcon-Light.icns" "${RES_DIR}/AppIcon-Light.icns"
+    fi
 elif command -v rsvg-convert >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
   echo "==> Generating AppIcon.icns"
   mkdir -p "${WORK}/AppIcon.iconset"

@@ -532,6 +532,7 @@ namespace DeepSeekHarness
             ClientSize = new Size(1100, 720);
             MinimumSize = new Size(640, 420);
             StartPosition = FormStartPosition.CenterScreen;
+            ApplyAppIcon();
 
             // The embedded UI: the same page a browser would load at the
             // served URL. WebView2 runs on the Edge runtime installed with
@@ -907,6 +908,42 @@ namespace DeepSeekHarness
             catch (Exception)
             {
             }
+        }
+
+        private void ApplyAppIcon()
+        {
+            try
+            {
+                string iconFile = IsLightTheme() ? "app-light.ico" : "app.ico";
+                string iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, iconFile);
+                if (File.Exists(iconPath))
+                {
+                    this.Icon = new Icon(iconPath);
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        private static bool IsLightTheme()
+        {
+            try
+            {
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(
+                    @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
+                {
+                    if (key != null)
+                    {
+                        object value = key.GetValue("AppsUseLightTheme");
+                        if (value is int) return ((int)value) != 0;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+            }
+            return false;
         }
 
         private static void OpenLogs()
