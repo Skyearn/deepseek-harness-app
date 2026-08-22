@@ -599,7 +599,7 @@ namespace DeepSeekHarness
             checkItem.Click += delegate { CheckUpdates(); };
             ToolStripMenuItem coreItem = new ToolStripMenuItem("更新内核");
             coreItem.Click += delegate { UpdateCore(); };
-            ToolStripMenuItem shellItem = new ToolStripMenuItem("下载壳更新");
+            ToolStripMenuItem shellItem = new ToolStripMenuItem("更新 App 壳");
             shellItem.Click += delegate { DownloadShellUpdate(); };
             ToolStripMenuItem updateDirItem = new ToolStripMenuItem("打开更新目录");
             updateDirItem.Click += delegate { OpenUpdateDirectory(); };

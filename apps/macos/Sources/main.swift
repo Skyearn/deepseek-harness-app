@@ -759,7 +759,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let updateMenu = NSMenu(title: "更新")
         updateMenu.addItem(withTitle: "检查更新…", action: #selector(checkUpdates(_:)), keyEquivalent: "u")
         updateMenu.addItem(withTitle: "更新内核", action: #selector(updateCore(_:)), keyEquivalent: "")
-        updateMenu.addItem(withTitle: "下载壳更新", action: #selector(downloadShellUpdate(_:)), keyEquivalent: "")
+        updateMenu.addItem(withTitle: "更新 App 壳", action: #selector(downloadShellUpdate(_:)), keyEquivalent: "")
         updateMenu.addItem(.separator())
         updateMenu.addItem(withTitle: "打开更新目录",
                            action: #selector(openUpdateDirectory(_:)), keyEquivalent: "")
