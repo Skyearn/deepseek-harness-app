@@ -703,6 +703,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                             self.bootstrapProgress?.isHidden = false
                             self.bootstrapProgress?.doubleValue = ratio
                             self.bootstrapLabel?.stringValue = "正在下载运行环境… \(Int(ratio * 100))%"
+                        } else if progress.hasPrefix("正在下载") {
+                            self.bootstrapIndeterminate?.isHidden = true
+                            self.bootstrapIndeterminate?.stopAnimation(nil)
+                            self.bootstrapProgress?.isHidden = false
+                            self.bootstrapProgress?.doubleValue = 0
+                            self.bootstrapLabel?.stringValue = progress + " 0%"
                         } else {
                             self.bootstrapProgress?.isHidden = true
                             self.bootstrapIndeterminate?.isHidden = false
