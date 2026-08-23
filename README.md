@@ -86,10 +86,6 @@ deepseek-harness-app/
 │   ├── version                      # 当前壳版本
 │   └── dsh-version                  # 上次 shell release 绑定的 dsh 版本
 │
-├── scripts/
-│   ├── build-runtime-macos.sh       # 构建 macOS prebuilt runtime
-│   └── build-runtime-windows.ps1    # 构建 Windows prebuilt runtime
-│
 └── README.md
 ```
 
@@ -137,14 +133,10 @@ Windows：
 powershell -ExecutionPolicy Bypass -File apps/windows/build.ps1
 ```
 
-runtime bundle：
+runtime bundle 构建与发布不在这里，改在独立仓库：
 
-```sh
-bash scripts/build-runtime-macos.sh <dsh-version>
-```
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/build-runtime-windows.ps1 -DshVersion <dsh-version>
+```text
+https://github.com/Skyearn/deepseek-harness-runtime
 ```
 
 ---
