@@ -65,8 +65,7 @@ DeepSeek Harness 桌面壳仓库。
 deepseek-harness-app/
 ├── .github/
 │   └── workflows/
-│       ├── app-release.yml          # 构建并发布 shell App
-│       └── runtime-release.yml      # 自动构建并发布 prebuilt runtime
+│       └── app-release.yml          # 构建并发布 shell App
 │
 ├── apps/
 │   ├── macos/
@@ -92,6 +91,12 @@ deepseek-harness-app/
 │   └── build-runtime-windows.ps1    # 构建 Windows prebuilt runtime
 │
 └── README.md
+```
+
+Prebuilt runtime 发布在独立仓库：
+
+```text
+https://github.com/Skyearn/deepseek-harness-runtime
 ```
 
 ---
