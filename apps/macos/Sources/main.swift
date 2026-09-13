@@ -307,9 +307,16 @@ final class ServerController {
     /// The address the core actually serves. Newer cores print it with a
     /// per-run `?token=` that the web UI requires, so prefer the URL logged by
     /// this launch and fall back to the bare host:port.
-    var url: URL { servedURL ?? URL(string: "http://127.0.0.1:\(port)")! }
+    var url: URL {
+        servedURLLock.lock()
+        defer { servedURLLock.unlock() }
+        return servedURL ?? URL(string: "http://127.0.0.1:\(port)")!
+    }
 
     private var servedURL: URL?
+    /// `servedURL` is written by the readiness thread and read by the main
+    /// thread (status bar, web view), so both sides go through this lock.
+    private let servedURLLock = NSLock()
     private var launchLogOffset: UInt64 = 0
     private var pid: pid_t = 0
     private var dshPath = ""
@@ -373,7 +380,9 @@ final class ServerController {
         let nodeDir = URL(fileURLWithPath: nodePath).deletingLastPathComponent().path
         let environment = childEnvironment(extraPathDirs: [nodeDir])
 
+        servedURLLock.lock()
         servedURL = nil
+        servedURLLock.unlock()
         launchLogOffset = serverLogSize()
         do {
             pid = try spawnServer(executable: nodePath, arguments: arguments, environment: environment, logURL: Paths.serverLog)
@@ -486,11 +495,11 @@ final class ServerController {
     private func onReady() {
         guard !isQuitting else { return }
         // The core prints the exact address it serves, which now carries a
-        // per-run token; give that line a moment to flush before showing the UI
-        // so the web view loads the URL the core actually accepts.
+        // per-run token; wait for that line before showing the UI so the web
+        // view loads the URL the core actually accepts.
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
-            self.resolveServedURL(attempts: 20)
+            self.resolveServedURL(timeout: 2.0)
             DispatchQueue.main.async {
                 guard !self.isQuitting else { return }
                 self.state = .running
@@ -507,15 +516,21 @@ final class ServerController {
         return (attributes?[.size] as? NSNumber)?.uint64Value ?? 0
     }
 
-    /// Reads the log text appended since this launch and keeps the last
-    /// `dsh web: <url>` line the core printed for it.
-    private func resolveServedURL(attempts: Int) {
-        for _ in 0..<attempts {
+    /// Keeps the last `dsh web: <url>` line the core printed for this launch.
+    /// The core logs the token only after its (slow) client-module composition,
+    /// so this is bounded by a deadline and the bare host:port stays the
+    /// fallback rather than stalling startup further.
+    private func resolveServedURL(timeout: TimeInterval) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while true {
             if let reached = lastServedURL() {
+                servedURLLock.lock()
                 servedURL = reached
+                servedURLLock.unlock()
                 return
             }
-            usleep(100_000)
+            if Date() >= deadline { return }
+            usleep(50_000)
         }
     }
 
@@ -721,7 +736,7 @@ final class StatusBarView: NSView {
 
 // MARK: - App delegate
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
     private var statusBar: NSView!
@@ -740,11 +755,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var overlayStatus = ""
     private var overlayStartedAt = Date()
     private var updaterBusy = false
+    /// Startup feedback: shown from launch until the web UI has actually
+    /// navigated, so the window never sits as an unexplained white page.
+    private var launchOverlayActive = false
+    private var launchWebRunning = false
+    private var launchStartedAt = Date()
+    private static let launchStatus = "正在启动本地服务…"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installSignalHandlers()
         buildMenu()
         buildWindow()
+        beginLaunchOverlay()
 
         ServerController.shared.onStateChange = { [weak self] in self?.refreshUI() }
         refreshUI()
@@ -917,6 +939,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         configuration.websiteDataStore = .nonPersistent()
         let web = WKWebView(frame: .zero, configuration: configuration)
         web.translatesAutoresizingMaskIntoConstraints = false
+        web.navigationDelegate = self
         content.addSubview(web)
 
         let bar = StatusBarView()
@@ -1043,6 +1066,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             statusLabel.stringValue = "已停止"
             urlField.stringValue = ""
             showStoppedPage(message)
+            endLaunchOverlay()
             if message != lastFailure {
                 lastFailure = message
                 showFailureAlert(message)
@@ -1055,6 +1079,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func loadWebView() {
         guard !isQuitting, webView != nil else { return }
         webView.load(URLRequest(url: ServerController.shared.url))
+    }
+
+    // MARK: Web navigation
+
+    /// The core needs seconds to compose its client modules before it serves
+    /// the page, so the startup overlay stays up until the web UI has really
+    /// navigated instead of being torn down when the port merely opens.
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard launchOverlayActive else { return }
+        launchWebRunning = true
+        endLaunchOverlay()
+    }
+
+    /// A failed load must not leave the overlay covering the error page.
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        endLaunchOverlay()
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        endLaunchOverlay()
+    }
+
+    // MARK: Startup overlay
+
+    private func beginLaunchOverlay() {
+        launchOverlayActive = true
+        launchWebRunning = false
+        launchStartedAt = Date()
+        bootstrapOverlay?.isHidden = false
+        bootstrapProgress?.isHidden = true
+        bootstrapIndeterminate?.isHidden = false
+        bootstrapIndeterminate?.startAnimation(nil)
+        bootstrapLabel?.stringValue = Self.launchStatus
+        overlayTimer?.invalidate()
+        overlayTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            self?.refreshOverlayLabel()
+        }
+    }
+
+    private func endLaunchOverlay() {
+        guard launchOverlayActive else { return }
+        launchOverlayActive = false
+        // A running web UI may be replaced later (restart, core update); the
+        // next navigation must not be treated as a fresh cold start.
+        launchWebRunning = true
+        refreshOverlayLabel()
+        endOverlay()
     }
 
     /// A minimal in-window error page when the server is down.
@@ -1256,13 +1327,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         refreshOverlayLabel()
     }
 
+    /// The overlay label belongs to whichever long-running task owns it: an
+    /// updater run outranks a still-pending startup.
     private func refreshOverlayLabel() {
-        let elapsed = Int(Date().timeIntervalSince(overlayStartedAt))
-        bootstrapLabel?.stringValue = elapsed >= 3 ? "\(overlayStatus)（已用 \(elapsed)s）" : overlayStatus
+        let status: String
+        let startedAt: Date
+        if updaterBusy {
+            status = overlayStatus
+            startedAt = overlayStartedAt
+        } else if launchOverlayActive {
+            status = Self.launchStatus
+            startedAt = launchStartedAt
+        } else {
+            return
+        }
+        let elapsed = Int(Date().timeIntervalSince(startedAt))
+        bootstrapLabel?.stringValue = elapsed >= 3 ? "\(status)（已用 \(elapsed)s）" : status
     }
 
     private func endOverlay() {
         updaterBusy = false
+        if launchOverlayActive {
+            // Startup is still in flight (an update ran during it): keep the
+            // window covered and hand the label back to the startup status.
+            refreshOverlayLabel()
+            return
+        }
         overlayTimer?.invalidate()
         overlayTimer = nil
         bootstrapIndeterminate?.stopAnimation(nil)

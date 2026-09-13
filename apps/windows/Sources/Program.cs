@@ -542,6 +542,13 @@ namespace DeepSeekHarness
         private DateTime portOpenedAt = DateTime.MinValue;
         private DateTime readyDeadline;
         private string lastFailure;
+        /// Startup feedback: covers the WebView2 until the served page has
+        /// actually navigated, so the window never sits as an unexplained
+        /// white page while the core boots.
+        private Panel startupOverlay;
+        private Label startupLabel;
+        private DateTime startupStartedAt = DateTime.MinValue;
+        private static readonly string StartupStatus = "正在启动本地服务…";
 
         public MainForm()
         {
@@ -572,6 +579,14 @@ namespace DeepSeekHarness
                     // (English on an English Windows) is replaced.
                     web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
                     web.CoreWebView2.ContextMenuRequested += OnContextMenuRequested;
+                    // The first successful navigation is what ends startup: the
+                    // overlay must outlive the port opening, because the core
+                    // serves the page only after composing its client modules.
+                    web.CoreWebView2.NavigationCompleted += delegate(object navSender,
+                        CoreWebView2NavigationCompletedEventArgs navArgs)
+                    {
+                        HideStartupOverlay();
+                    };
                 }
             };
 
@@ -664,8 +679,54 @@ namespace DeepSeekHarness
             barMenu.Items.Add(toggleBar);
             bar.ContextMenuStrip = barMenu;
 
+            // Startup overlay: a full-window cover shown from launch until the
+            // embedded UI has navigated. Added before the other children so the
+            // status bar stays visible beneath it, matching the macOS shell.
+            startupOverlay = new Panel();
+            startupOverlay.Dock = DockStyle.Fill;
+            startupOverlay.BackColor = SystemColors.Window;
+
+            startupLabel = new Label();
+            startupLabel.AutoSize = false;
+            startupLabel.TextAlign = ContentAlignment.MiddleCenter;
+            startupLabel.Dock = DockStyle.Fill;
+            startupLabel.Text = StartupStatus;
+            startupOverlay.Controls.Add(startupLabel);
+
+            Controls.Add(startupOverlay);
             Controls.Add(web);
             Controls.Add(bar);
+
+            System.Windows.Forms.Timer startupTicker = new System.Windows.Forms.Timer();
+            startupTicker.Interval = 1000;
+            startupTicker.Tick += delegate { RefreshStartupLabel(); };
+            startupTicker.Start();
+        }
+
+        /// <summary>Shows a running elapsed counter once startup outlasts a moment.</summary>
+        private void RefreshStartupLabel()
+        {
+            if (startupOverlay == null || startupOverlay.Visible == false) return;
+            int elapsed = (int)(DateTime.UtcNow - startupStartedAt).TotalSeconds;
+            startupLabel.Text = elapsed >= 3
+                ? StartupStatus + "（已用 " + elapsed + "s）"
+                : StartupStatus;
+        }
+
+        /// <summary>Covers the WebView while the core boots; idempotent.</summary>
+        private void ShowStartupOverlay()
+        {
+            if (startupOverlay == null) return;
+            startupStartedAt = DateTime.UtcNow;
+            startupLabel.Text = StartupStatus;
+            startupOverlay.Visible = true;
+            startupOverlay.BringToFront();
+        }
+
+        private void HideStartupOverlay()
+        {
+            if (startupOverlay == null) return;
+            startupOverlay.Visible = false;
         }
 
         private static void UpdateStatusBarMenuItem(ToolStripMenuItem item, bool visible)
@@ -690,6 +751,7 @@ namespace DeepSeekHarness
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
+            ShowStartupOverlay();
             Application.ApplicationExit += delegate { server.Terminate(); };
             server.WriteAppLock();
             bool hasBundledDsh = File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
@@ -838,6 +900,7 @@ namespace DeepSeekHarness
 
         private void Fail(string message)
         {
+            HideStartupOverlay();
             statusLabel.Text = "已停止";
             urlLabel.Text = "";
             openButton.Enabled = false;
