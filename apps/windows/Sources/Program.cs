@@ -253,6 +253,7 @@ namespace DeepSeekHarness
         public int Pid;
         public string DshPath = "";
         public string NodePath = "";
+        public string ServedURL = "";
         public bool Quitting;
 
         // Resolves both executables; recovery and start both need them.
@@ -283,6 +284,7 @@ namespace DeepSeekHarness
             {
             }
 
+            ServedURL = "";
             Process process = new Process();
             process.StartInfo.FileName = NodePath;
             process.StartInfo.Arguments = "\"" + DshPath + "\" web --no-open";
@@ -322,8 +324,17 @@ namespace DeepSeekHarness
             return null;
         }
 
-        private static void AppendLog(string line)
+        private void AppendLog(string line)
         {
+            // The core prints the address it serves; newer versions add a
+            // per-run token that the web UI requires.
+            int index = line.IndexOf("dsh web: ", StringComparison.Ordinal);
+            if (index >= 0)
+            {
+                string candidate = line.Substring(index + "dsh web: ".Length).Trim();
+                Uri parsed;
+                if (Uri.TryCreate(candidate, UriKind.Absolute, out parsed)) ServedURL = candidate;
+            }
             lock (LogLock)
             {
                 try
@@ -334,6 +345,11 @@ namespace DeepSeekHarness
                 {
                 }
             }
+        }
+
+        public string Url()
+        {
+            return ServedURL.Length > 0 ? ServedURL : "http://127.0.0.1:" + Settings.Port;
         }
 
         public bool ChildAlive()
@@ -523,6 +539,7 @@ namespace DeepSeekHarness
         private Button openButton;
         private Button restartButton;
         private bool ready;
+        private DateTime portOpenedAt = DateTime.MinValue;
         private DateTime readyDeadline;
         private string lastFailure;
 
@@ -585,7 +602,7 @@ namespace DeepSeekHarness
             openButton.Text = "打开浏览器";
             openButton.Width = 120;
             openButton.Enabled = false;
-            openButton.Click += delegate { Browser.Open(Settings.Port); };
+            openButton.Click += delegate { Browser.Open(server.Url()); };
 
             restartButton = new Button();
             restartButton.Text = "重启";
@@ -603,7 +620,7 @@ namespace DeepSeekHarness
             ToolStripMenuItem updateDirItem = new ToolStripMenuItem("打开更新目录");
             updateDirItem.Click += delegate { OpenUpdateDirectory(); };
             updateMenu.Items.AddRange(new ToolStripItem[] {
-                checkItem, coreItem, shellItem, new ToolStripSeparator(), updateDirItem
+                checkItem, shellItem, coreItem, new ToolStripSeparator(), updateDirItem
             });
 
             Button updateButton = new Button();
@@ -722,6 +739,7 @@ namespace DeepSeekHarness
                 return;
             }
             ready = false;
+            portOpenedAt = DateTime.MinValue;
             readyDeadline = DateTime.Now.AddSeconds(90);
             lifeTimer = new System.Windows.Forms.Timer();
             lifeTimer.Interval = 300;
@@ -750,13 +768,19 @@ namespace DeepSeekHarness
             {
                 if (Net.PortOpen(Settings.Port))
                 {
+                    // Give the core a moment to print its served URL, which now
+                    // carries the token the web UI needs.
+                    if (portOpenedAt == DateTime.MinValue) portOpenedAt = DateTime.Now;
+                    if (server.ServedURL.Length == 0
+                        && (DateTime.Now - portOpenedAt).TotalSeconds < 1.5) return;
+                    portOpenedAt = DateTime.MinValue;
                     ready = true;
                     statusLabel.Text = "运行中";
-                    urlLabel.Text = "http://127.0.0.1:" + Settings.Port;
+                    urlLabel.Text = server.Url();
                     openButton.Enabled = true;
                     restartButton.Enabled = true;
                     LoadWebView();
-                    if (Settings.OpenBrowserOnLaunch) Browser.Open(Settings.Port);
+                    if (Settings.OpenBrowserOnLaunch) Browser.Open(server.Url());
                 }
                 else if (DateTime.Now > readyDeadline)
                 {
@@ -770,7 +794,7 @@ namespace DeepSeekHarness
         {
             try
             {
-                web.Source = new Uri("http://127.0.0.1:" + Settings.Port);
+                web.Source = new Uri(server.Url());
             }
             catch (Exception)
             {
@@ -779,7 +803,18 @@ namespace DeepSeekHarness
 
         private void Restart()
         {
+            Restart(false);
+        }
+
+        /// <summary>
+        /// Restarts the server. reResolvePaths is set after a core update, which
+        /// replaces the version directory the cached dsh path pointed at: the old
+        /// server is stopped first, then the paths are resolved again.
+        /// </summary>
+        private void Restart(bool reResolvePaths)
+        {
             server.Terminate();
+            if (reResolvePaths) server.Resolve();
             ready = false;
             statusLabel.Text = "Starting server…";
             urlLabel.Text = "http://127.0.0.1:" + Settings.Port;
@@ -882,28 +917,97 @@ namespace DeepSeekHarness
             return info.TryGetValue(key, out value) ? value : fallback;
         }
 
-        private static bool IsVersionAtLeast(string current, string latest)
+        /// <summary>Splits "0.1.5-rc.2" into release [0,1,5] plus prerelease ["rc","2"].</summary>
+        private static void ParseVersion(string version, out int[] release, out string[] prerelease)
         {
-            if (current == latest) return true;
-            string[] a = current.Split('.');
-            string[] b = latest.Split('.');
-            int count = Math.Max(a.Length, b.Length);
-            for (int i = 0; i < count; i++)
+            string[] halves = version.Split(new[] { '-' }, 2);
+            string[] releaseParts = halves[0].Split('.');
+            release = new int[releaseParts.Length];
+            for (int i = 0; i < releaseParts.Length; i++)
             {
-                int x = i < a.Length ? 0 : 0;
-                int y = i < b.Length ? 0 : 0;
-                int.TryParse(i < a.Length ? a[i] : "0", out x);
-                int.TryParse(i < b.Length ? b[i] : "0", out y);
-                if (x != y) return x > y;
+                int value;
+                release[i] = int.TryParse(releaseParts[i], out value) ? value : 0;
             }
-            return true;
+            prerelease = halves.Length > 1 && halves[1].Length > 0 ? halves[1].Split('.') : new string[0];
         }
 
-        private static string UpdateLine(string name, string current, string latest)
+        /// <summary>
+        /// Compares two versions the way semver does, so "0.1.5-rc.2" counts as newer
+        /// than "0.1.2-rc.1" instead of both collapsing to the same numbers.
+        /// </summary>
+        private static int CompareVersions(string lhs, string rhs)
         {
+            int[] aRelease;
+            string[] aPre;
+            int[] bRelease;
+            string[] bPre;
+            ParseVersion(lhs, out aRelease, out aPre);
+            ParseVersion(rhs, out bRelease, out bPre);
+
+            int releaseCount = Math.Max(aRelease.Length, bRelease.Length);
+            for (int i = 0; i < releaseCount; i++)
+            {
+                int x = i < aRelease.Length ? aRelease[i] : 0;
+                int y = i < bRelease.Length ? bRelease[i] : 0;
+                if (x != y) return x < y ? -1 : 1;
+            }
+
+            // A release outranks any of its prereleases.
+            if ((aPre.Length == 0) != (bPre.Length == 0))
+            {
+                return aPre.Length == 0 ? 1 : -1;
+            }
+
+            int preCount = Math.Max(aPre.Length, bPre.Length);
+            for (int i = 0; i < preCount; i++)
+            {
+                if (i >= aPre.Length) return -1;
+                if (i >= bPre.Length) return 1;
+                string x = aPre[i];
+                string y = bPre[i];
+                if (x == y) continue;
+
+                // Numeric identifiers compare numerically and rank below words.
+                long xn;
+                long yn;
+                bool xNumeric = long.TryParse(x, out xn);
+                bool yNumeric = long.TryParse(y, out yn);
+                if (xNumeric && yNumeric) return xn < yn ? -1 : 1;
+                if (xNumeric != yNumeric) return xNumeric ? -1 : 1;
+                return string.CompareOrdinal(x, y) < 0 ? -1 : 1;
+            }
+
+            return 0;
+        }
+
+        private static bool IsVersionAtLeast(string current, string latest)
+        {
+            return CompareVersions(current, latest) >= 0;
+        }
+
+        /// <summary>
+        /// "hasUpdate" comes from the updater, which owns the version comparison;
+        /// fall back to the local one when an older updater omits it.
+        /// </summary>
+        private static string UpdateLine(string name, string current, string latest, bool? hasUpdate = null)
+        {
+            if (latest.Length == 0 || latest == "?")
+            {
+                return current.Length == 0 || current == "?"
+                    ? name + ": 未安装"
+                    : name + ": " + current + "（无法获取最新版本）";
+            }
             if (current.Length == 0 || current == "?") return name + ": 未安装 -> " + latest;
-            if (IsVersionAtLeast(current, latest)) return name + ": " + current + "（已是最新）";
+            bool shouldUpdate = hasUpdate.HasValue ? hasUpdate.Value : !IsVersionAtLeast(current, latest);
+            if (!shouldUpdate) return name + ": " + current + "（已是最新）";
             return name + ": " + current + " -> " + latest;
+        }
+
+        private static bool? HasUpdateFlag(Dictionary<string, string> info, string key)
+        {
+            string value = Get(info, key, "");
+            if (value.Length == 0) return null;
+            return value == "1";
         }
 
         private void CheckUpdates()
@@ -919,43 +1023,124 @@ namespace DeepSeekHarness
             string shellLatest = Get(info, "SHELL_LATEST", "?");
             string coreCurrent = Get(info, "CORE_CURRENT", "");
             string coreLatest = Get(info, "CORE_LATEST", "?");
-            string text = UpdateLine("壳", shellCurrent, shellLatest) + "\n"
-                + UpdateLine("内核", coreCurrent, coreLatest);
+            string text = UpdateLine("壳", shellCurrent, shellLatest, HasUpdateFlag(info, "SHELL_HAS_UPDATE")) + "\n"
+                + UpdateLine("内核", coreCurrent, coreLatest, HasUpdateFlag(info, "CORE_HAS_UPDATE"));
             MessageBox.Show(this, text, "检查更新", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private bool updaterBusy;
+
+        /// <summary>
+        /// Runs an updater command on a background thread behind a small progress
+        /// window, so a multi-minute npm install or bundle download never freezes
+        /// the shell. <paramref name="done"/> runs on the UI thread with the output.
+        /// </summary>
+        private void RunUpdaterWithProgress(string arguments, string title, Action<string> done)
+        {
+            if (updaterBusy)
+            {
+                System.Media.SystemSounds.Beep.Play();
+                return;
+            }
+            updaterBusy = true;
+
+            Form dialog = new Form();
+            dialog.Text = title;
+            dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+            dialog.StartPosition = FormStartPosition.CenterParent;
+            dialog.MinimizeBox = false;
+            dialog.MaximizeBox = false;
+            dialog.ControlBox = false;
+            dialog.ShowInTaskbar = false;
+            dialog.ClientSize = new Size(400, 86);
+
+            Label label = new Label();
+            label.AutoSize = false;
+            label.TextAlign = ContentAlignment.MiddleLeft;
+            label.Text = title;
+            label.SetBounds(16, 14, 368, 22);
+            dialog.Controls.Add(label);
+
+            ProgressBar bar = new ProgressBar();
+            bar.Style = ProgressBarStyle.Marquee;
+            bar.MarqueeAnimationSpeed = 30;
+            bar.SetBounds(16, 44, 368, 16);
+            dialog.Controls.Add(bar);
+
+            // Create the handle now so the worker's BeginInvoke cannot race it.
+            dialog.CreateControl();
+
+            string[] captured = new string[1];
+            DateTime started = DateTime.UtcNow;
+            System.Windows.Forms.Timer ticker = new System.Windows.Forms.Timer();
+            ticker.Interval = 1000;
+            ticker.Tick += delegate
+            {
+                label.Text = title + "（已用 " + (int)(DateTime.UtcNow - started).TotalSeconds + "s）";
+            };
+            ticker.Start();
+
+            ThreadPool.QueueUserWorkItem(delegate(object state)
+            {
+                captured[0] = RunUpdater(arguments);
+                try
+                {
+                    dialog.BeginInvoke((MethodInvoker)delegate { dialog.Close(); });
+                }
+                catch (Exception)
+                {
+                    // The dialog was closed early; nothing left to do.
+                }
+            });
+
+            dialog.ShowDialog(this);
+            ticker.Stop();
+            ticker.Dispose();
+            updaterBusy = false;
+            if (captured[0] != null) done(captured[0]);
         }
 
         private void UpdateCore()
         {
-            string output = RunUpdater("update-core");
-            Dictionary<string, string> info = ParseUpdateOutput(output);
-            if (Get(info, "CORE_UPDATED", "") == "1")
+            RunUpdaterWithProgress("update-core", "正在更新 DSH 内核…", delegate(string output)
             {
-                Restart();
-                MessageBox.Show(this, "内核已更新到 " + Get(info, "CORE_VERSION", "?"), "更新完成",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            else
-            {
-                MessageBox.Show(this, output.Length == 0 ? "更新失败，请检查网络" : output, "内核更新失败",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+                Dictionary<string, string> info = ParseUpdateOutput(output);
+                if (Get(info, "CORE_UPDATED", "") == "1")
+                {
+                    Restart(true);
+                    MessageBox.Show(this, "内核已更新到 " + Get(info, "CORE_VERSION", "?"), "更新完成",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                else if (Get(info, "CORE_ALREADY_LATEST", "") == "1")
+                {
+                    MessageBox.Show(this, "内核：" + Get(info, "CORE_VERSION", "?") + "（已是最新）", "检查更新",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                else
+                {
+                    MessageBox.Show(this, output.Length == 0 ? "更新失败，请检查网络" : output, "内核更新失败",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            });
         }
 
         private void DownloadShellUpdate()
         {
-            string output = RunUpdater("download-shell");
-            Dictionary<string, string> info = ParseUpdateOutput(output);
-            if (Get(info, "SHELL_DOWNLOADED", "") == "1")
+            RunUpdaterWithProgress("download-shell", "正在下载 APP 壳…", delegate(string output)
             {
-                string path = Get(info, "SHELL_DOWNLOAD", Settings.StatePath());
-                Directory.CreateDirectory(path);
-                Process.Start("explorer.exe", path);
-            }
-            else
-            {
-                MessageBox.Show(this, output.Length == 0 ? "下载失败，请检查网络" : output, "壳更新下载失败",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+                Dictionary<string, string> info = ParseUpdateOutput(output);
+                if (Get(info, "SHELL_DOWNLOADED", "") == "1")
+                {
+                    string path = Get(info, "SHELL_DOWNLOAD", Settings.StatePath());
+                    Directory.CreateDirectory(path);
+                    Process.Start("explorer.exe", path);
+                }
+                else
+                {
+                    MessageBox.Show(this, output.Length == 0 ? "下载失败，请检查网络" : output, "壳更新下载失败",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            });
         }
 
         private void OpenUpdateDirectory()
@@ -1049,9 +1234,14 @@ namespace DeepSeekHarness
     {
         public static void Open(int port)
         {
+            Open("http://127.0.0.1:" + port);
+        }
+
+        public static void Open(string url)
+        {
             try
             {
-                Process.Start("http://127.0.0.1:" + port);
+                Process.Start(url);
             }
             catch (Exception)
             {

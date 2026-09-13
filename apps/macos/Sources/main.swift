@@ -304,8 +304,13 @@ final class ServerController {
 
     private(set) var state: ServerState = .stopped
     private(set) var port: Int
-    var url: URL { URL(string: "http://127.0.0.1:\(port)")! }
+    /// The address the core actually serves. Newer cores print it with a
+    /// per-run `?token=` that the web UI requires, so prefer the URL logged by
+    /// this launch and fall back to the bare host:port.
+    var url: URL { servedURL ?? URL(string: "http://127.0.0.1:\(port)")! }
 
+    private var servedURL: URL?
+    private var launchLogOffset: UInt64 = 0
     private var pid: pid_t = 0
     private var dshPath = ""
     private var nodePath = ""
@@ -331,6 +336,10 @@ final class ServerController {
         let dsh = resolveDSH()
         let node = resolveNode()
         guard let dsh, let node else {
+            // Never keep a stale path around: a core update removes the
+            // directory the previous resolution pointed at.
+            dshPath = ""
+            nodePath = ""
             pendingFailure = buildResolutionMessage(dsh: dsh, node: node)
             return false
         }
@@ -364,6 +373,8 @@ final class ServerController {
         let nodeDir = URL(fileURLWithPath: nodePath).deletingLastPathComponent().path
         let environment = childEnvironment(extraPathDirs: [nodeDir])
 
+        servedURL = nil
+        launchLogOffset = serverLogSize()
         do {
             pid = try spawnServer(executable: nodePath, arguments: arguments, environment: environment, logURL: Paths.serverLog)
         } catch {
@@ -474,11 +485,58 @@ final class ServerController {
 
     private func onReady() {
         guard !isQuitting else { return }
-        state = .running
-        onStateChange?()
-        if UserDefaults.standard.bool(forKey: "openBrowserOnLaunch") {
-            NSWorkspace.shared.open(url)
+        // The core prints the exact address it serves, which now carries a
+        // per-run token; give that line a moment to flush before showing the UI
+        // so the web view loads the URL the core actually accepts.
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            self.resolveServedURL(attempts: 20)
+            DispatchQueue.main.async {
+                guard !self.isQuitting else { return }
+                self.state = .running
+                self.onStateChange?()
+                if UserDefaults.standard.bool(forKey: "openBrowserOnLaunch") {
+                    NSWorkspace.shared.open(self.url)
+                }
+            }
         }
+    }
+
+    private func serverLogSize() -> UInt64 {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: Paths.serverLog.path)
+        return (attributes?[.size] as? NSNumber)?.uint64Value ?? 0
+    }
+
+    /// Reads the log text appended since this launch and keeps the last
+    /// `dsh web: <url>` line the core printed for it.
+    private func resolveServedURL(attempts: Int) {
+        for _ in 0..<attempts {
+            if let reached = lastServedURL() {
+                servedURL = reached
+                return
+            }
+            usleep(100_000)
+        }
+    }
+
+    private func lastServedURL() -> URL? {
+        guard let handle = try? FileHandle(forReadingFrom: Paths.serverLog) else { return nil }
+        defer { try? handle.close() }
+        let data: Data
+        do {
+            try handle.seek(toOffset: launchLogOffset)
+            data = try handle.readToEnd() ?? Data()
+        } catch {
+            return nil
+        }
+        guard let text = String(data: data, encoding: .utf8) else { return nil }
+        var found: URL?
+        for line in text.split(whereSeparator: \.isNewline) {
+            guard let range = line.range(of: "dsh web: ") else { continue }
+            let raw = String(line[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+            if let parsed = URL(string: raw) { found = parsed }
+        }
+        return found
     }
 
     private func onServerExited(code: Int, signal: Int) {
@@ -510,6 +568,20 @@ final class ServerController {
         terminateServer()
         state = .stopped
         onStateChange?()
+        start()
+    }
+
+    /// Restarts after the core updater replaced the installed dsh version. The
+    /// running server is stopped first, while the cached dsh path still matches
+    /// its command line, and only then are the executables re-resolved - the
+    /// version directory the old path pointed at no longer exists.
+    func restartAfterCoreUpdate() {
+        guard !isQuitting else { return }
+        terminateServer()
+        state = .stopped
+        onStateChange?()
+        _ = resolvePaths()
+        recoverStaleServer()
         start()
     }
 
@@ -664,6 +736,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var bootstrapLabel: NSTextField?
     private var bootstrapProgress: NSProgressIndicator?
     private var bootstrapIndeterminate: NSProgressIndicator?
+    private var overlayTimer: Timer?
+    private var overlayStatus = ""
+    private var overlayStartedAt = Date()
+    private var updaterBusy = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installSignalHandlers()
@@ -686,49 +762,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let hasBundledDsh = (Bundle.main.resourceURL?.appendingPathComponent("dsh").path)
             .map { FileManager.default.fileExists(atPath: $0) } ?? false
         if managedCoreDSHPath() == nil && !hasBundledDsh {
-            bootstrapOverlay?.isHidden = false
-            bootstrapLabel?.stringValue = "正在下载运行环境…"
-            bootstrapProgress?.doubleValue = 0
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                let output = self?.runUpdaterStreaming(arguments: ["bootstrap", "--shell-current", self?.shellVersion() ?? ""], timeout: 1800) { progress in
-                    DispatchQueue.main.async {
-                        guard let self else { return }
-                        if let slash = progress.firstIndex(of: "/"),
-                           let done = Double(progress[..<slash]),
-                           let total = Double(progress[progress.index(after: slash)...]),
-                           total > 0 {
-                            let ratio = min(done / total, 1)
-                            self.bootstrapIndeterminate?.isHidden = true
-                            self.bootstrapIndeterminate?.stopAnimation(nil)
-                            self.bootstrapProgress?.isHidden = false
-                            self.bootstrapProgress?.doubleValue = ratio
-                            self.bootstrapLabel?.stringValue = "正在下载运行环境… \(Int(ratio * 100))%"
-                        } else if progress.hasPrefix("正在下载") {
-                            self.bootstrapIndeterminate?.isHidden = true
-                            self.bootstrapIndeterminate?.stopAnimation(nil)
-                            self.bootstrapProgress?.isHidden = false
-                            self.bootstrapProgress?.doubleValue = 0
-                            self.bootstrapLabel?.stringValue = progress + " 0%"
-                        } else {
-                            self.bootstrapProgress?.isHidden = true
-                            self.bootstrapIndeterminate?.isHidden = false
-                            self.bootstrapIndeterminate?.startAnimation(nil)
-                            self.bootstrapLabel?.stringValue = progress
-                        }
-                    }
-                } ?? ""
-                DispatchQueue.main.async {
-                    self?.bootstrapIndeterminate?.stopAnimation(nil)
-                    self?.bootstrapIndeterminate?.isHidden = true
-                    self?.bootstrapProgress?.isHidden = true
-                    self?.bootstrapOverlay?.isHidden = true
-                    if self?.parseUpdateOutput(output)["BOOTSTRAP_OK"] == "1" {
-                        _ = ServerController.shared.resolvePaths()
-                        ServerController.shared.recoverStaleServer()
-                        ServerController.shared.start()
-                    } else {
-                        self?.showBootstrapFailure(output)
-                    }
+            runUpdaterInOverlay(
+                arguments: ["bootstrap", "--shell-current", shellVersion()],
+                title: "正在下载运行环境…",
+                timeout: 1800
+            ) { [weak self] output in
+                if self?.parseUpdateOutput(output)["BOOTSTRAP_OK"] == "1" {
+                    _ = ServerController.shared.resolvePaths()
+                    ServerController.shared.recoverStaleServer()
+                    ServerController.shared.start()
+                } else {
+                    self?.showBootstrapFailure(output)
                 }
             }
         } else {
@@ -815,8 +859,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         mainMenu.addItem(updateItem)
         let updateMenu = NSMenu(title: "更新")
         updateMenu.addItem(withTitle: "检查更新…", action: #selector(checkUpdates(_:)), keyEquivalent: "u")
-        updateMenu.addItem(withTitle: "更新 DSH 内核", action: #selector(updateCore(_:)), keyEquivalent: "")
         updateMenu.addItem(withTitle: "更新 APP 壳", action: #selector(downloadShellUpdate(_:)), keyEquivalent: "")
+        updateMenu.addItem(withTitle: "更新 DSH 内核", action: #selector(updateCore(_:)), keyEquivalent: "")
         updateMenu.addItem(.separator())
         updateMenu.addItem(withTitle: "打开更新目录",
                            action: #selector(openUpdateDirectory(_:)), keyEquivalent: "")
@@ -1148,6 +1192,85 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return output
     }
 
+    // MARK: - Update progress overlay
+
+    /// Runs an updater command off the main thread and reports its STATUS /
+    /// PROGRESS lines in the shared overlay, so npm installs and runtime
+    /// downloads never freeze the window.
+    private func runUpdaterInOverlay(
+        arguments: [String],
+        title: String,
+        timeout: TimeInterval,
+        completion: @escaping (String) -> Void
+    ) {
+        guard !updaterBusy else {
+            NSSound.beep()
+            return
+        }
+        beginOverlay(title: title)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let output = self.runUpdaterStreaming(arguments: arguments, timeout: timeout) { progress in
+                DispatchQueue.main.async { self.showOverlayProgress(progress, title: title) }
+            }
+            DispatchQueue.main.async {
+                self.endOverlay()
+                completion(output)
+            }
+        }
+    }
+
+    private func beginOverlay(title: String) {
+        updaterBusy = true
+        overlayStatus = title
+        overlayStartedAt = Date()
+        bootstrapOverlay?.isHidden = false
+        bootstrapProgress?.doubleValue = 0
+        bootstrapProgress?.isHidden = true
+        bootstrapIndeterminate?.isHidden = false
+        bootstrapIndeterminate?.startAnimation(nil)
+        bootstrapLabel?.stringValue = title
+        overlayTimer?.invalidate()
+        overlayTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            self?.refreshOverlayLabel()
+        }
+    }
+
+    private func showOverlayProgress(_ progress: String, title: String) {
+        if let slash = progress.firstIndex(of: "/"),
+           let done = Double(progress[..<slash]),
+           let total = Double(progress[progress.index(after: slash)...]),
+           total > 0 {
+            let ratio = min(done / total, 1)
+            overlayStatus = "\(title) \(Int(ratio * 100))%"
+            bootstrapIndeterminate?.stopAnimation(nil)
+            bootstrapIndeterminate?.isHidden = true
+            bootstrapProgress?.isHidden = false
+            bootstrapProgress?.doubleValue = ratio
+        } else {
+            overlayStatus = progress
+            bootstrapProgress?.isHidden = true
+            bootstrapIndeterminate?.isHidden = false
+            bootstrapIndeterminate?.startAnimation(nil)
+        }
+        refreshOverlayLabel()
+    }
+
+    private func refreshOverlayLabel() {
+        let elapsed = Int(Date().timeIntervalSince(overlayStartedAt))
+        bootstrapLabel?.stringValue = elapsed >= 3 ? "\(overlayStatus)（已用 \(elapsed)s）" : overlayStatus
+    }
+
+    private func endOverlay() {
+        updaterBusy = false
+        overlayTimer?.invalidate()
+        overlayTimer = nil
+        bootstrapIndeterminate?.stopAnimation(nil)
+        bootstrapIndeterminate?.isHidden = true
+        bootstrapProgress?.isHidden = true
+        bootstrapOverlay?.isHidden = true
+    }
+
     private func parseUpdateOutput(_ output: String) -> [String: String] {
         var dict: [String: String] = [:]
         for line in output.components(separatedBy: .newlines) {
@@ -1160,68 +1283,126 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return dict
     }
 
-    private func isVersionAtLeast(_ current: String, _ latest: String) -> Bool {
-        let a = current.split(separator: ".").compactMap { Int($0) }
-        let b = latest.split(separator: ".").compactMap { Int($0) }
-        let count = max(a.count, b.count)
-        for i in 0..<count {
-            let x = i < a.count ? a[i] : 0
-            let y = i < b.count ? b[i] : 0
-            if x != y { return x > y }
-        }
-        return true
+    /// Splits `0.1.5-rc.2` into `[0, 1, 5]` plus `["rc", "2"]`.
+    private func parseVersion(_ version: String) -> (release: [Int], prerelease: [String]) {
+        let parts = version.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+        let release = (parts.first ?? "").split(separator: ".").compactMap { Int($0) }
+        let prerelease = parts.count > 1 ? parts[1].split(separator: ".").map(String.init) : []
+        return (release, prerelease)
     }
 
-    private func updateLine(name: String, current: String, latest: String) -> String {
+    /// Compares two versions the way semver does, so `0.1.5-rc.2` counts as
+    /// newer than `0.1.2-rc.1` instead of both collapsing to `[0, 1, 1]`.
+    private func compareVersions(_ lhs: String, _ rhs: String) -> Int {
+        let a = parseVersion(lhs)
+        let b = parseVersion(rhs)
+        for i in 0..<max(a.release.count, b.release.count) {
+            let x = i < a.release.count ? a.release[i] : 0
+            let y = i < b.release.count ? b.release[i] : 0
+            if x != y { return x < y ? -1 : 1 }
+        }
+        // A release outranks any of its prereleases.
+        if a.prerelease.isEmpty != b.prerelease.isEmpty {
+            return a.prerelease.isEmpty ? 1 : -1
+        }
+        for i in 0..<max(a.prerelease.count, b.prerelease.count) {
+            guard i < a.prerelease.count else { return -1 }
+            guard i < b.prerelease.count else { return 1 }
+            let x = a.prerelease[i]
+            let y = b.prerelease[i]
+            if x == y { continue }
+            // Numeric identifiers compare numerically and rank below words.
+            if let xn = Int(x), let yn = Int(y) { return xn < yn ? -1 : 1 }
+            if Int(x) != nil { return -1 }
+            if Int(y) != nil { return 1 }
+            return x < y ? -1 : 1
+        }
+        return 0
+    }
+
+    private func isVersionAtLeast(_ current: String, _ latest: String) -> Bool {
+        compareVersions(current, latest) >= 0
+    }
+
+    /// `hasUpdate` comes from the updater, which owns the version comparison;
+    /// fall back to the local one when an older updater omits it.
+    private func updateLine(name: String, current: String, latest: String, hasUpdate: Bool? = nil) -> String {
+        guard !latest.isEmpty, latest != "?" else {
+            return current.isEmpty || current == "?"
+                ? "\(name)：未安装"
+                : "\(name)：\(current)（无法获取最新版本）"
+        }
         if current.isEmpty || current == "?" { return "\(name)：未安装 -> \(latest)" }
-        if isVersionAtLeast(current, latest) { return "\(name)：\(current)（已是最新）" }
+        let shouldUpdate = hasUpdate ?? !isVersionAtLeast(current, latest)
+        if !shouldUpdate { return "\(name)：\(current)（已是最新）" }
         return "\(name)：\(current) -> \(latest)"
     }
 
     @objc private func checkUpdates(_ sender: Any?) {
         let output = runUpdater(arguments: ["check", "--shell-current", shellVersion()])
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed.hasPrefix("ERROR") {
+            let alert = NSAlert()
+            alert.messageText = "检查更新失败"
+            alert.informativeText = trimmed.isEmpty ? "请检查网络后重试" : trimmed
+            alert.addButton(withTitle: "好")
+            alert.runModal()
+            return
+        }
         let info = parseUpdateOutput(output)
         let shellCurrent = info["SHELL_CURRENT"] ?? "?"
         let shellLatest = info["SHELL_LATEST"] ?? "?"
         let coreCurrent = info["CORE_CURRENT"] ?? ""
         let coreLatest = info["CORE_LATEST"] ?? "?"
+        let shellHasUpdate = info["SHELL_HAS_UPDATE"].map { $0 == "1" }
+        let coreHasUpdate = info["CORE_HAS_UPDATE"].map { $0 == "1" }
         let alert = NSAlert()
         alert.messageText = "检查更新"
-        alert.informativeText = "\(updateLine(name: "壳", current: shellCurrent, latest: shellLatest))\n\(updateLine(name: "内核", current: coreCurrent, latest: coreLatest))"
+        alert.informativeText = "\(updateLine(name: "壳", current: shellCurrent, latest: shellLatest, hasUpdate: shellHasUpdate))\n\(updateLine(name: "内核", current: coreCurrent, latest: coreLatest, hasUpdate: coreHasUpdate))"
         alert.addButton(withTitle: "好")
         alert.runModal()
     }
 
     @objc private func updateCore(_ sender: Any?) {
-        let output = runUpdater(arguments: ["update-core"])
-        let info = parseUpdateOutput(output)
-        if info["CORE_UPDATED"] == "1" {
-            ServerController.shared.restart()
-            let alert = NSAlert()
-            alert.messageText = "内核更新完成"
-            alert.informativeText = "已切换到 \(info["CORE_VERSION"] ?? "?")"
-            alert.addButton(withTitle: "好")
-            alert.runModal()
-        } else {
-            let alert = NSAlert()
-            alert.messageText = "内核更新失败"
-            alert.informativeText = output.isEmpty ? "请检查网络后重试" : output
-            alert.addButton(withTitle: "好")
-            alert.runModal()
+        runUpdaterInOverlay(arguments: ["update-core"], title: "正在更新 DSH 内核…", timeout: 1800) { [weak self] output in
+            let info = self?.parseUpdateOutput(output) ?? [:]
+            if info["CORE_UPDATED"] == "1" {
+                ServerController.shared.restartAfterCoreUpdate()
+                let alert = NSAlert()
+                alert.messageText = "内核更新完成"
+                alert.informativeText = "已切换到 \(info["CORE_VERSION"] ?? "?")"
+                alert.addButton(withTitle: "好")
+                alert.runModal()
+            } else if info["CORE_ALREADY_LATEST"] == "1" {
+                let alert = NSAlert()
+                alert.messageText = "检查更新"
+                alert.informativeText = "内核：\(info["CORE_VERSION"] ?? "?")（已是最新）"
+                alert.addButton(withTitle: "好")
+                alert.runModal()
+            } else {
+                let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                let alert = NSAlert()
+                alert.messageText = "内核更新失败"
+                alert.informativeText = trimmed.isEmpty ? "请检查网络后重试" : trimmed
+                alert.addButton(withTitle: "好")
+                alert.runModal()
+            }
         }
     }
 
     @objc private func downloadShellUpdate(_ sender: Any?) {
-        let output = runUpdater(arguments: ["download-shell"])
-        let info = parseUpdateOutput(output)
-        if info["SHELL_DOWNLOADED"] == "1", let path = info["SHELL_DOWNLOAD"] {
-            NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
-        } else {
-            let alert = NSAlert()
-            alert.messageText = "壳更新下载失败"
-            alert.informativeText = output.isEmpty ? "请检查网络后重试" : output
-            alert.addButton(withTitle: "好")
-            alert.runModal()
+        runUpdaterInOverlay(arguments: ["download-shell"], title: "正在下载 APP 壳…", timeout: 1800) { [weak self] output in
+            let info = self?.parseUpdateOutput(output) ?? [:]
+            if info["SHELL_DOWNLOADED"] == "1", let path = info["SHELL_DOWNLOAD"] {
+                NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
+            } else {
+                let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                let alert = NSAlert()
+                alert.messageText = "壳更新下载失败"
+                alert.informativeText = trimmed.isEmpty ? "请检查网络后重试" : trimmed
+                alert.addButton(withTitle: "好")
+                alert.runModal()
+            }
         }
     }
 
