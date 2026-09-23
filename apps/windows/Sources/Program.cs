@@ -539,6 +539,8 @@ namespace DeepSeekHarness
         private Button openButton;
         private Button restartButton;
         private bool ready;
+        private bool updaterBusy;
+        private bool updateCheckBusy;
         private DateTime portOpenedAt = DateTime.MinValue;
         private DateTime readyDeadline;
         private string lastFailure;
