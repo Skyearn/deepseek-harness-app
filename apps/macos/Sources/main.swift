@@ -118,6 +118,13 @@ func managedCoreDSHPath() -> String? {
     return FileManager.default.fileExists(atPath: installed) ? installed : nil
 }
 
+/// The version recorded in the runtime `current` file, or an empty string
+/// when no managed core is installed yet.
+func managedCoreVersion() -> String {
+    guard let raw = try? String(contentsOf: Paths.runtimeCurrent, encoding: .utf8) else { return "" }
+    return raw.trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
 /// The dsh executable, in order: the `dshPath` preference, the runtime install
 /// maintained by the shell updater, the dsh install bundled under
 /// Contents/Resources/dsh (from `build.sh --bundle-dsh`), then a PATH search.
@@ -190,7 +197,7 @@ func captureProcessOutput(executable: String, arguments: [String], timeout: Time
     process.executableURL = URL(fileURLWithPath: executable)
     process.arguments = arguments
     process.standardOutput = pipe
-    process.standardError = Pipe()
+    process.standardError = pipe
     let finished = DispatchSemaphore(value: 0)
     process.terminationHandler = { _ in finished.signal() }
     do {
@@ -286,6 +293,244 @@ func spawnServer(executable: String, arguments: [String], environment: [String: 
     }
     return pid
 }
+
+// MARK: - Cancellable updater run
+
+/// A cancellable updater run. node leads its own process group, so cancelling
+/// takes npm/tar down with it, and stdout+stderr share one pipe.
+final class UpdaterRun {
+    private var pid: pid_t = 0
+    private let lock = NSLock()
+    private var output = ""
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    private var capturedOutput: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return output
+    }
+
+    func run(node: String, script: String, arguments: [String], timeout: TimeInterval, onLine: @escaping (String) -> Void) -> String {
+        var fds: [Int32] = [-1, -1]
+        guard pipe(&fds) == 0 else { return "ERROR: cannot create a pipe" }
+        let readFd = fds[0]
+        let writeFd = fds[1]
+
+        var fileActions: posix_spawn_file_actions_t?
+        posix_spawn_file_actions_init(&fileActions)
+        defer { posix_spawn_file_actions_destroy(&fileActions) }
+        posix_spawn_file_actions_adddup2(&fileActions, writeFd, STDOUT_FILENO)
+        posix_spawn_file_actions_adddup2(&fileActions, writeFd, STDERR_FILENO)
+        posix_spawn_file_actions_addclose(&fileActions, readFd)
+        posix_spawn_file_actions_addclose(&fileActions, writeFd)
+
+        var attr: posix_spawnattr_t?
+        posix_spawnattr_init(&attr)
+        defer { posix_spawnattr_destroy(&attr) }
+        posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETPGROUP))
+        posix_spawnattr_setpgroup(&attr, 0)
+
+        let argv: [UnsafeMutablePointer<CChar>?] = ([node, script] + arguments).map { strdup($0) } + [nil]
+        defer { for pointer in argv { if let pointer { free(pointer) } } }
+        let environment = ProcessInfo.processInfo.environment
+        let env: [UnsafeMutablePointer<CChar>?] = environment.keys.sorted()
+            .map { strdup($0 + "=" + (environment[$0] ?? "")) } + [nil]
+        defer { for pointer in env { if let pointer { free(pointer) } } }
+
+        var child: pid_t = 0
+        let spawned = posix_spawn(&child, node, &fileActions, &attr, argv, env)
+        close(writeFd)
+        guard spawned == 0 else {
+            close(readFd)
+            return "ERROR: could not start the updater (" + String(spawned) + ")"
+        }
+        lock.lock()
+        pid = child
+        let alreadyCancelled = cancelled
+        lock.unlock()
+        if alreadyCancelled { kill(-child, SIGTERM) }
+
+        let pipeHandle = FileHandle(fileDescriptor: readFd, closeOnDealloc: true)
+        let eof = DispatchSemaphore(value: 0)
+        pipeHandle.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard data.isEmpty == false else {
+                handle.readabilityHandler = nil
+                eof.signal()
+                return
+            }
+            guard let self else { return }
+            self.consume(data, onLine: onLine)
+        }
+
+        var timedOut = false
+        if (eof.wait(timeout: .now() + timeout) == .success) == false {
+            timedOut = true
+            cancel()
+            _ = eof.wait(timeout: .now() + 5)
+        }
+        pipeHandle.readabilityHandler = nil
+        var status: Int32 = 0
+        waitpid(child, &status, 0)
+        lock.lock()
+        pid = 0
+        lock.unlock()
+        if timedOut { return capturedOutput + " ERROR: the updater timed out" }
+        return capturedOutput
+    }
+
+    private func consume(_ data: Data, onLine: (String) -> Void) {
+        let text = String(data: data, encoding: .utf8) ?? ""
+        lock.lock()
+        output += text
+        lock.unlock()
+        for line in text.components(separatedBy: .newlines) where line.isEmpty == false {
+            onLine(line)
+        }
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let target = pid
+        lock.unlock()
+        guard target > 0 else { return }
+        kill(-target, SIGTERM)
+    }
+}
+
+
+// MARK: - Update progress window
+
+/// A standalone progress window for update tasks: it never covers the main
+/// window, describes what is being fetched and can be cancelled.
+final class UpdateProgressPanel: NSWindow {
+    var onCancel: (() -> Void)?
+
+    private let headlineLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(labelWithString: "")
+    private let elapsedLabel = NSTextField(labelWithString: "")
+    private let progress = NSProgressIndicator()
+    private let cancelButton = NSButton()
+    private var baseHeadline = ""
+    private var startedAt = Date()
+    private var timer: Timer?
+
+    init(title: String, headline: String) {
+        baseHeadline = headline
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 460, height: 176),
+                   styleMask: [.titled], backing: .buffered, defer: false)
+        self.title = title
+        isReleasedWhenClosed = false
+
+        let icon = NSImageView(frame: NSRect(x: 20, y: 114, width: 40, height: 40))
+        icon.image = NSApp.applicationIconImage
+        contentView?.addSubview(icon)
+
+        headlineLabel.stringValue = headline
+        headlineLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        headlineLabel.lineBreakMode = .byTruncatingMiddle
+        headlineLabel.frame = NSRect(x: 72, y: 124, width: 368, height: 18)
+        contentView?.addSubview(headlineLabel)
+
+        detailLabel.font = .systemFont(ofSize: 11)
+        detailLabel.textColor = .secondaryLabelColor
+        detailLabel.lineBreakMode = .byTruncatingMiddle
+        detailLabel.frame = NSRect(x: 72, y: 102, width: 368, height: 16)
+        contentView?.addSubview(detailLabel)
+
+
+        progress.style = .bar
+        progress.isIndeterminate = true
+        progress.isDisplayedWhenStopped = false
+        progress.frame = NSRect(x: 20, y: 66, width: 420, height: 14)
+        progress.startAnimation(nil)
+        contentView?.addSubview(progress)
+
+        elapsedLabel.font = .systemFont(ofSize: 11)
+        elapsedLabel.textColor = .secondaryLabelColor
+        elapsedLabel.frame = NSRect(x: 20, y: 40, width: 260, height: 16)
+        contentView?.addSubview(elapsedLabel)
+
+        cancelButton.title = "取消"
+        cancelButton.bezelStyle = .rounded
+        cancelButton.target = self
+        cancelButton.action = #selector(cancelTapped)
+        cancelButton.frame = NSRect(x: 344, y: 16, width: 96, height: 32)
+        contentView?.addSubview(cancelButton)
+
+        startedAt = Date()
+        refreshElapsed()
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            self?.refreshElapsed()
+        }
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("UpdateProgressPanel is created in code only")
+    }
+
+    func present() {
+        center()
+        makeKeyAndOrderFront(nil)
+    }
+
+    func finish() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    func setVersion(_ version: String) {
+        headlineLabel.stringValue = version.isEmpty ? baseHeadline : baseHeadline + " " + version
+    }
+
+
+    private var totalBytes: Double = 0
+
+    func setTotal(_ total: Double) {
+        totalBytes = total
+        showProgress(done: 0, total: total)
+    }
+
+    func showStatus(_ text: String) {
+        detailLabel.stringValue = text
+    }
+
+    func showProgress(done: Double, total: Double) {
+        guard total > 0 else { return }
+        progress.stopAnimation(nil)
+        progress.isIndeterminate = false
+        progress.doubleValue = min(done / total, 1)
+        let percent = Int(min(done / total, 1) * 100)
+        detailLabel.stringValue = bytes(done) + " / " + bytes(total) + " (" + String(percent) + "%)"
+    }
+
+    private func bytes(_ value: Double) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        formatter.allowedUnits = [.useMB, .useKB, .useGB]
+        return formatter.string(fromByteCount: Int64(value))
+    }
+
+    private func refreshElapsed() {
+        let seconds = Int(Date().timeIntervalSince(startedAt))
+        elapsedLabel.stringValue = "已用" + " " + String(seconds) + "s"
+    }
+
+    @objc private func cancelTapped() {
+        cancelButton.isEnabled = false
+        cancelButton.title = "正在取消…"
+        detailLabel.stringValue = "正在取消…"
+        onCancel?()
+    }
+}
+
 
 // MARK: - Server controller
 
@@ -755,6 +1000,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     private var overlayStatus = ""
     private var overlayStartedAt = Date()
     private var updaterBusy = false
+    private var progressPanel: UpdateProgressPanel?
+    private var activeUpdater: UpdaterRun?
+    private var updateCheckBusy = false
     /// Startup feedback: shown from launch until the web UI has actually
     /// navigated, so the window never sits as an unexplained white page.
     private var launchOverlayActive = false
@@ -850,7 +1098,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "关于 DeepSeek Harness",
-                        action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+                        action: #selector(showAbout(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "打开浏览器", action: #selector(openBrowser(_:)), keyEquivalent: "b")
         appMenu.addItem(withTitle: "重启服务", action: #selector(restartServer(_:)), keyEquivalent: "r")
@@ -1174,7 +1422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     private func showBootstrapFailure(_ output: String) {
         let alert = NSAlert()
         alert.messageText = "下载运行环境失败"
-        alert.informativeText = output.isEmpty ? "请检查网络后重试" : output
+        alert.informativeText = failureDetail(output)
         alert.alertStyle = .critical
         alert.addButton(withTitle: "好")
         alert.runModal()
@@ -1231,7 +1479,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         process.executableURL = URL(fileURLWithPath: node)
         process.arguments = [script] + arguments
         process.standardOutput = pipe
-        process.standardError = Pipe()
+        process.standardError = pipe
         let outputLock = NSLock()
         var output = ""
         pipe.fileHandleForReading.readabilityHandler = { handle in
@@ -1361,6 +1609,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         bootstrapOverlay?.isHidden = true
     }
 
+    /// The updater streams `PROGRESS=` lines while downloading and prints
+    /// `ERROR: <message>` when it fails; surface the error (or the tail) so the
+    /// alert does not become a wall of progress spam.
+    private func failureDetail(_ output: String) -> String {
+        let lines = output.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        if let error = lines.last(where: { $0.hasPrefix("ERROR") }) { return error }
+        let tail = lines.filter { line in line.isEmpty == false && line.hasPrefix("PROGRESS=") == false }.suffix(6)
+        return tail.isEmpty ? "请检查网络后重试" : tail.joined(separator: "\n")
+    }
+
     private func parseUpdateOutput(_ output: String) -> [String: String] {
         var dict: [String: String] = [:]
         for line in output.components(separatedBy: .newlines) {
@@ -1428,8 +1687,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         return "\(name)：\(current) -> \(latest)"
     }
 
+    /// Shows the shell and core versions. Both are read live, so the panel
+    /// follows a core update without restarting the app.
+    @objc private func showAbout(_ sender: Any?) {
+        let core = managedCoreVersion()
+        let alert = NSAlert()
+        alert.messageText = "DeepSeek Harness"
+        alert.informativeText = "壳版本：\(shellVersion())\n内核版本：\(core.isEmpty ? "未安装" : core)"
+        if let icon = NSApp.applicationIconImage {
+            alert.icon = icon
+        }
+        alert.addButton(withTitle: "好")
+        alert.runModal()
+    }
+
     @objc private func checkUpdates(_ sender: Any?) {
-        let output = runUpdater(arguments: ["check", "--shell-current", shellVersion()])
+        guard updateCheckBusy == false else {
+            NSSound.beep()
+            return
+        }
+        updateCheckBusy = true
+        statusLabel?.stringValue = "正在检查更新…"
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let output = self.runUpdater(arguments: ["check", "--shell-current", self.shellVersion()])
+            DispatchQueue.main.async {
+                self.updateCheckBusy = false
+                self.refreshUI()
+                self.presentCheckResult(output)
+            }
+        }
+    }
+
+    private func presentCheckResult(_ output: String) {
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty || trimmed.hasPrefix("ERROR") {
             let alert = NSAlert()
@@ -1453,8 +1743,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         alert.runModal()
     }
 
+    /// Runs an updater command in a standalone progress window with a cancel
+    /// button, so the main window is never covered and the transfer is visible.
+    private func runUpdaterInPanel(
+        arguments: [String],
+        title: String,
+        headline: String,
+        completion: @escaping (String) -> Void
+    ) {
+        guard updaterBusy == false else {
+            NSSound.beep()
+            return
+        }
+        guard let node = resolveNode(),
+              let script = Bundle.main.resourceURL?.appendingPathComponent("updater.mjs").path else {
+            showInfoAlert(title: title, text: "找不到 node 或 updater.mjs")
+            return
+        }
+        updaterBusy = true
+        let task = UpdaterRun()
+        activeUpdater = task
+        let panel = UpdateProgressPanel(title: title, headline: headline)
+        progressPanel = panel
+        panel.onCancel = { task.cancel() }
+        panel.present()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let output = task.run(node: node, script: script, arguments: arguments, timeout: 1800) { line in
+                DispatchQueue.main.async { self?.handleUpdaterLine(line) }
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.progressPanel?.finish()
+                self.progressPanel?.close()
+                self.progressPanel = nil
+                self.activeUpdater = nil
+                self.updaterBusy = false
+                if task.isCancelled {
+                    self.showInfoAlert(title: title, text: "已取消")
+                } else {
+                    completion(output)
+                }
+            }
+        }
+    }
+
+    private func handleUpdaterLine(_ line: String) {
+        guard let panel = progressPanel else { return }
+        if line.hasPrefix("TARGET_VERSION=") {
+            panel.setVersion(String(line.dropFirst("TARGET_VERSION=".count)))
+        } else if line.hasPrefix("TARGET_SIZE=") {
+            panel.setTotal(Double(String(line.dropFirst("TARGET_SIZE=".count))) ?? 0)
+        } else if line.hasPrefix("PROGRESS=") {
+            let parts = String(line.dropFirst("PROGRESS=".count)).split(separator: "/")
+            if parts.count == 2 {
+                panel.showProgress(done: Double(parts[0]) ?? 0, total: Double(parts[1]) ?? 0)
+            }
+        } else if line.hasPrefix("STATUS=") {
+            panel.showStatus(String(line.dropFirst(7)))
+        }
+    }
+
+    private func showInfoAlert(title: String, text: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = text
+        alert.addButton(withTitle: "好")
+        alert.runModal()
+    }
+
     @objc private func updateCore(_ sender: Any?) {
-        runUpdaterInOverlay(arguments: ["update-core"], title: "正在更新 DSH 内核…", timeout: 1800) { [weak self] output in
+        runUpdaterInPanel(arguments: ["update-core"], title: "更新 DSH 内核", headline: "DSH 内核") { [weak self] output in
             let info = self?.parseUpdateOutput(output) ?? [:]
             if info["CORE_UPDATED"] == "1" {
                 ServerController.shared.restartAfterCoreUpdate()
@@ -1470,10 +1828,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
                 alert.addButton(withTitle: "好")
                 alert.runModal()
             } else {
-                let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
                 let alert = NSAlert()
                 alert.messageText = "内核更新失败"
-                alert.informativeText = trimmed.isEmpty ? "请检查网络后重试" : trimmed
+                alert.informativeText = self?.failureDetail(output) ?? "请检查网络后重试"
                 alert.addButton(withTitle: "好")
                 alert.runModal()
             }
@@ -1481,15 +1838,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     }
 
     @objc private func downloadShellUpdate(_ sender: Any?) {
-        runUpdaterInOverlay(arguments: ["download-shell"], title: "正在下载 APP 壳…", timeout: 1800) { [weak self] output in
+        runUpdaterInPanel(arguments: ["download-shell"], title: "更新 APP 壳", headline: "APP 壳") { [weak self] output in
             let info = self?.parseUpdateOutput(output) ?? [:]
             if info["SHELL_DOWNLOADED"] == "1", let path = info["SHELL_DOWNLOAD"] {
                 NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
             } else {
-                let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
                 let alert = NSAlert()
                 alert.messageText = "壳更新下载失败"
-                alert.informativeText = trimmed.isEmpty ? "请检查网络后重试" : trimmed
+                alert.informativeText = self?.failureDetail(output) ?? "请检查网络后重试"
                 alert.addButton(withTitle: "好")
                 alert.runModal()
             }

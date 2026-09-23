@@ -75,6 +75,14 @@ fi
 # --- Info.plist ---------------------------------------------------------------
 cp "${SCRIPT_DIR}/Resources/Info.plist" "${APP_DIR}/Contents/Info.plist"
 
+# Keep the bundle's own version in sync with apps/version so Finder, the Dock and
+# the standard about panel never show a stale number.
+SHELL_VERSION="$(tr -d '[:space:]' < "${REPO_ROOT}/apps/version")"
+if [[ -n "${SHELL_VERSION}" ]]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${SHELL_VERSION}" "${APP_DIR}/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${SHELL_VERSION}" "${APP_DIR}/Contents/Info.plist"
+fi
+
 # --- Update helper --------------------------------------------------------------
 cp "${REPO_ROOT}/apps/updater/updater.mjs" "${RES_DIR}/updater.mjs"
 cp "${REPO_ROOT}/apps/version" "${RES_DIR}/version.txt"

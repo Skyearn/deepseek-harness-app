@@ -10,7 +10,7 @@
 // Output is line oriented so both the Swift and C# shells can parse it.
 
 import https from 'node:https'
-import { createWriteStream, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, renameSync, writeFileSync, openSync, closeSync } from 'node:fs'
+import { createWriteStream, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, renameSync, statSync, writeFileSync, openSync, closeSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join, dirname, basename } from 'node:path'
@@ -154,22 +154,43 @@ function emitLine(line) {
   process.stdout.write(`${line}\n`)
 }
 
-function download(url, dest) {
+function downloadOnce(url, dest, offset, redirects = 0) {
   return new Promise((resolve, reject) => {
     mkdirSync(dirname(dest), { recursive: true })
-    const req = https.get(url, { headers: { 'user-agent': 'deepseek-harness-updater' } }, (res) => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+    const headers = { 'user-agent': 'deepseek-harness-updater' }
+    if (offset > 0) headers.Range = `bytes=${offset}-`
+    const req = https.get(url, { headers }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirects < 5) {
         res.resume()
-        return download(new URL(res.headers.location, url), dest).then(resolve, reject)
+        resolve(downloadOnce(new URL(res.headers.location, url).toString(), dest, offset, redirects + 1))
+        return
+      }
+      if (res.statusCode === 416 && offset > 0) {
+        // The local file is already as long as the remote one: start over.
+        res.resume()
+        resolve(downloadOnce(url, dest, 0, redirects))
+        return
       }
       if (res.statusCode < 200 || res.statusCode >= 300) {
+        res.resume()
         reject(new Error(`HTTP ${res.statusCode} for ${url}`))
         return
       }
-      const total = Number(res.headers['content-length'] || 0)
-      let downloaded = 0
-      let lastReport = 0
-      const file = createWriteStream(dest)
+      const resuming = offset > 0 && res.statusCode === 206
+      const total = Number(res.headers['content-length'] || 0) + (resuming ? offset : 0)
+
+      if (total > 0) emitLine("TARGET_SIZE=" + total)
+      let downloaded = resuming ? offset : 0
+      let lastReport = downloaded
+      let settled = false
+      const file = createWriteStream(dest, { flags: resuming ? 'a' : 'w' })
+      const fail = (error) => {
+        if (settled) return
+        settled = true
+        res.destroy()
+        file.destroy()
+        reject(error)
+      }
       res.on('data', chunk => {
         downloaded += chunk.length
         file.write(chunk)
@@ -178,14 +199,40 @@ function download(url, dest) {
           emitLine(`PROGRESS=${downloaded}/${total}`)
         }
       })
-      res.on('end', () => {
-        file.end()
+      res.on('end', () => file.end())
+      res.on('error', fail)
+      res.on('aborted', () => fail(new Error(`download aborted for ${url}`)))
+      file.on('finish', () => {
+        if (settled) return
+        settled = true
+        file.close(() => resolve())
       })
-      file.on('finish', () => file.close(() => resolve()))
-      file.on('error', reject)
+      file.on('error', fail)
     })
     req.on('error', reject)
+    req.setTimeout(60_000, () => req.destroy(new Error(`download stalled for ${url}`)))
   })
+}
+
+// A prebuilt bundle is ~120 MB, so one flaky moment must not lose the whole
+// update: keep the partial file, resume from its length and retry.
+async function download(url, dest, attempts = 3) {
+  let lastError = null
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const offset = existsSync(dest) ? statSync(dest).size : 0
+      await downloadOnce(url, dest, offset)
+      return
+    } catch (error) {
+      lastError = error
+      if (attempt < attempts) {
+        emitLine(`STATUS=下载中断，正在重试（${attempt + 1}/${attempts}）…`)
+        await new Promise(resolve => setTimeout(resolve, 1500 * attempt))
+      }
+    }
+  }
+  rmSync(dest, { force: true })
+  throw lastError
 }
 
 function run(command, args, env) {
@@ -358,6 +405,30 @@ async function coreLatest() {
 }
 
 async function shellLatest() {
+  try {
+    const viaAPI = await shellLatestViaAPI()
+    if (viaAPI.version) return viaAPI
+  } catch {
+    // Rate-limited or offline: fall back to the redirect below.
+  }
+  return await shellLatestFallback()
+}
+
+// The anonymous GitHub API allows only 60 requests per hour per IP and is
+// often rate-limited behind NAT, so resolve the newest app release through
+// the /releases/latest redirect, which needs no API call.
+async function shellLatestFallback() {
+  const tag = await resolveReleaseTag(REPO)
+  if (tag.startsWith("app-v") == false) return { version: "", url: "", assetUrl: "" }
+  const version = tag.slice(5)
+  const suffix = isWindows ? "windows-x64.zip" : "macos-universal.zip"
+  return {
+    version,
+    url: "https://github.com/" + REPO + "/releases/tag/" + tag,
+    assetUrl: "https://github.com/" + REPO + "/releases/download/" + tag + "/DeepSeek-Harness-" + version + "-" + suffix,
+  }
+}
+async function shellLatestViaAPI() {
   const releases = await requestJSON(`https://api.github.com/repos/${REPO}/releases?per_page=20`)
   const release = highestRelease(releases, 'app-v')
   if (!release) {
@@ -480,6 +551,7 @@ async function updateCore() {
     return
   }
 
+  emitLine("TARGET_VERSION=" + target)
   if (preferBundle) {
     await installRuntimeBundle(bundleUrl)
     output([['CORE_VERSION', readCurrentCoreVersion() || bundleVersion], ['CORE_UPDATED', '1']])
@@ -601,6 +673,7 @@ function runtimeBundleVersion(url) {
 async function downloadShell() {
   const shell = await shellLatest()
   if (!shell.assetUrl) throw new Error('no shell asset found in the latest release')
+  emitLine("TARGET_VERSION=" + shell.version)
   const destination = join(appSupport, 'downloads', `DeepSeek-Harness-${shell.version}${isWindows ? '-windows-x64.zip' : '-macos-universal.zip'}`)
   await download(shell.assetUrl, destination)
   output([
@@ -609,6 +682,13 @@ async function downloadShell() {
     ['SHELL_DOWNLOADED', '1'],
   ])
 }
+
+// An unhandled async error would otherwise kill the process without printing
+// anything the shells can show, leaving them with a wall of PROGRESS lines.
+process.on('uncaughtException', (error) => {
+  process.stdout.write(`ERROR: ${error && error.message ? error.message : String(error)}\n`)
+  process.exit(1)
+})
 
 const command = process.argv[2] || 'check'
 try {

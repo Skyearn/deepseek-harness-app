@@ -634,8 +634,11 @@ namespace DeepSeekHarness
             shellItem.Click += delegate { DownloadShellUpdate(); };
             ToolStripMenuItem updateDirItem = new ToolStripMenuItem("打开更新目录");
             updateDirItem.Click += delegate { OpenUpdateDirectory(); };
+            ToolStripMenuItem aboutItem = new ToolStripMenuItem("关于");
+            aboutItem.Click += delegate { ShowAbout(); };
             updateMenu.Items.AddRange(new ToolStripItem[] {
-                checkItem, shellItem, coreItem, new ToolStripSeparator(), updateDirItem
+                checkItem, shellItem, coreItem, new ToolStripSeparator(), updateDirItem,
+                new ToolStripSeparator(), aboutItem
             });
 
             Button updateButton = new Button();
@@ -1075,7 +1078,29 @@ namespace DeepSeekHarness
 
         private void CheckUpdates()
         {
-            string output = RunUpdater("check --shell-current \"" + ShellVersion() + "\"");
+            if (updateCheckBusy)
+            {
+                System.Media.SystemSounds.Beep.Play();
+                return;
+            }
+            updateCheckBusy = true;
+            string previousStatus = statusLabel.Text;
+            statusLabel.Text = "正在检查更新…";
+            ThreadPool.QueueUserWorkItem(delegate(object state)
+            {
+                string quote = ((char)34).ToString();
+                string output = RunUpdater("check --shell-current " + quote + ShellVersion() + quote);
+                BeginInvoke((Action)delegate
+                {
+                    updateCheckBusy = false;
+                    statusLabel.Text = previousStatus;
+                    ShowCheckResult(output);
+                });
+            });
+        }
+
+        private void ShowCheckResult(string output)
+        {
             if (output.StartsWith("ERROR"))
             {
                 MessageBox.Show(this, output, "检查更新失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -1086,19 +1111,78 @@ namespace DeepSeekHarness
             string shellLatest = Get(info, "SHELL_LATEST", "?");
             string coreCurrent = Get(info, "CORE_CURRENT", "");
             string coreLatest = Get(info, "CORE_LATEST", "?");
-            string text = UpdateLine("壳", shellCurrent, shellLatest, HasUpdateFlag(info, "SHELL_HAS_UPDATE")) + "\n"
+            string text = UpdateLine("壳", shellCurrent, shellLatest, HasUpdateFlag(info, "SHELL_HAS_UPDATE")) + Environment.NewLine
                 + UpdateLine("内核", coreCurrent, coreLatest, HasUpdateFlag(info, "CORE_HAS_UPDATE"));
             MessageBox.Show(this, text, "检查更新", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
-        private bool updaterBusy;
+        /// Runs the updater and streams its merged stdout+stderr lines. The
+        /// process is handed to onStarted so a progress dialog can cancel the
+        /// whole tree.
+        private string RunUpdaterStreaming(string arguments, Action<string> onLine, Action<Process> onStarted)
+        {
+            string node = Resolver.FindNode();
+            string updater = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "updater.mjs");
+            if (node == null || File.Exists(updater) == false)
+            {
+                onLine("ERROR: cannot find node or updater.mjs");
+                return "ERROR: cannot find node or updater.mjs";
+            }
+            Process process = new Process();
+            process.StartInfo.FileName = node;
+            string quote = ((char)34).ToString();
+            process.StartInfo.Arguments = quote + updater + quote + " " + arguments;
+            process.StartInfo.UseShellExecute = false;
+            process.StartInfo.CreateNoWindow = true;
+            process.StartInfo.RedirectStandardOutput = true;
+            process.StartInfo.RedirectStandardError = true;
+            StringBuilder captured = new StringBuilder();
+            object gate = new object();
+            DataReceivedEventHandler handler = delegate(object sender, DataReceivedEventArgs e)
+            {
+                if (e.Data == null) return;
+                lock (gate) captured.AppendLine(e.Data);
+                onLine(e.Data);
+            };
+            process.OutputDataReceived += handler;
+            process.ErrorDataReceived += handler;
+            try
+            {
+                process.Start();
+            }
+            catch (Exception ex)
+            {
+                return "ERROR: " + ex.Message;
+            }
+            onStarted(process);
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            process.WaitForExit();
+            lock (gate) return captured.ToString();
+        }
 
-        /// <summary>
-        /// Runs an updater command on a background thread behind a small progress
-        /// window, so a multi-minute npm install or bundle download never freezes
-        /// the shell. <paramref name="done"/> runs on the UI thread with the output.
-        /// </summary>
-        private void RunUpdaterWithProgress(string arguments, string title, Action<string> done)
+        private static string Bytes(double value)
+        {
+            string[] units = new string[] { "B", "KB", "MB", "GB" };
+            double size = value;
+            int unit = 0;
+            while (size >= 1024 && unit < units.Length - 1)
+            {
+                size = size / 1024;
+                unit++;
+            }
+            return (unit == 0 ? ((long)size).ToString() : size.ToString("0.0")) + " " + units[unit];
+        }
+
+        private void ShowInfo(string title, string text)
+        {
+            MessageBox.Show(this, text, title, MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        /// Runs an updater command in a standalone progress dialog: it shows the
+        /// version and transfer size, never covers the main window, and can cancel
+        /// the whole process tree.
+        private void RunUpdaterWithProgress(string arguments, string title, string headline, Action<string> done)
         {
             if (updaterBusy)
             {
@@ -1110,62 +1194,135 @@ namespace DeepSeekHarness
             Form dialog = new Form();
             dialog.Text = title;
             dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
-            dialog.StartPosition = FormStartPosition.CenterParent;
+            dialog.StartPosition = FormStartPosition.CenterScreen;
             dialog.MinimizeBox = false;
             dialog.MaximizeBox = false;
             dialog.ControlBox = false;
             dialog.ShowInTaskbar = false;
-            dialog.ClientSize = new Size(400, 86);
+            dialog.ClientSize = new Size(460, 168);
 
-            Label label = new Label();
-            label.AutoSize = false;
-            label.TextAlign = ContentAlignment.MiddleLeft;
-            label.Text = title;
-            label.SetBounds(16, 14, 368, 22);
-            dialog.Controls.Add(label);
+            Label headlineLabel = new Label();
+            headlineLabel.AutoSize = false;
+            headlineLabel.Font = new Font(headlineLabel.Font, FontStyle.Bold);
+            headlineLabel.Text = headline;
+            headlineLabel.SetBounds(16, 14, 428, 20);
+            dialog.Controls.Add(headlineLabel);
+
+            Label detailLabel = new Label();
+            detailLabel.AutoSize = false;
+            detailLabel.Text = "正在准备…";
+            detailLabel.SetBounds(16, 40, 428, 18);
+            dialog.Controls.Add(detailLabel);
 
             ProgressBar bar = new ProgressBar();
             bar.Style = ProgressBarStyle.Marquee;
             bar.MarqueeAnimationSpeed = 30;
-            bar.SetBounds(16, 44, 368, 16);
+            bar.SetBounds(16, 68, 428, 16);
             dialog.Controls.Add(bar);
 
-            // Create the handle now so the worker's BeginInvoke cannot race it.
+            Label elapsedLabel = new Label();
+            elapsedLabel.AutoSize = false;
+            elapsedLabel.SetBounds(16, 92, 260, 18);
+            dialog.Controls.Add(elapsedLabel);
+
+            Button cancel = new Button();
+            cancel.Text = "取消";
+            cancel.SetBounds(348, 116, 96, 30);
+            dialog.Controls.Add(cancel);
             dialog.CreateControl();
 
-            string[] captured = new string[1];
+            Process child = null;
+            bool cancelledByUser = false;
+            Action<Action> ui = delegate(Action action)
+            {
+                try { dialog.BeginInvoke(action); } catch (Exception) { }
+            };
+
+            cancel.Click += delegate
+            {
+                cancelledByUser = true;
+                cancel.Enabled = false;
+                cancel.Text = "正在取消…";
+                detailLabel.Text = "正在取消…";
+                Process target = child;
+                if (target != null)
+                {
+                    try { Process.Start("taskkill", "/PID " + target.Id + " /T /F"); } catch (Exception) { }
+                }
+            };
+
+            Action<string> handleLine = delegate(string line)
+            {
+                if (line.StartsWith("TARGET_VERSION="))
+                {
+                    string version = line.Substring("TARGET_VERSION=".Length);
+                    ui(delegate { headlineLabel.Text = headline + " " + version; });
+                }
+                else if (line.StartsWith("TARGET_SIZE="))
+                {
+                    double parsed;
+                    if (double.TryParse(line.Substring("TARGET_SIZE=".Length), out parsed) && parsed > 0)
+                    {
+                        double totalSize = parsed;
+                        ui(delegate { detailLabel.Text = Bytes(0) + " / " + Bytes(totalSize); });
+                    }
+                }
+                else if (line.StartsWith("PROGRESS="))
+                {
+                    string[] parts = line.Substring("PROGRESS=".Length).Split(new string[] { "/" }, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length == 2)
+                    {
+                        double doneBytes;
+                        double totalBytes;
+                        if (double.TryParse(parts[0], out doneBytes) && double.TryParse(parts[1], out totalBytes) && totalBytes > 0)
+                        {
+                            int percent = (int)(doneBytes / totalBytes * 100);
+                            double doneValue = doneBytes;
+                            double totalValue = totalBytes;
+                            ui(delegate
+                            {
+                                bar.Style = ProgressBarStyle.Continuous;
+                                bar.Value = Math.Min(100, Math.Max(0, percent));
+                                detailLabel.Text = Bytes(doneValue) + " / " + Bytes(totalValue) + " (" + percent + "%)";
+                            });
+                        }
+                    }
+                }
+                else if (line.StartsWith("STATUS="))
+                {
+                    string status = line.Substring("STATUS=".Length);
+                    ui(delegate { detailLabel.Text = status; });
+                }
+            };
+
             DateTime started = DateTime.UtcNow;
             System.Windows.Forms.Timer ticker = new System.Windows.Forms.Timer();
             ticker.Interval = 1000;
             ticker.Tick += delegate
             {
-                label.Text = title + "（已用 " + (int)(DateTime.UtcNow - started).TotalSeconds + "s）";
+                int seconds = (int)(DateTime.UtcNow - started).TotalSeconds;
+                elapsedLabel.Text = "已用" + " " + seconds + "s";
             };
             ticker.Start();
 
+            string[] captured = new string[1];
             ThreadPool.QueueUserWorkItem(delegate(object state)
             {
-                captured[0] = RunUpdater(arguments);
-                try
-                {
-                    dialog.BeginInvoke((MethodInvoker)delegate { dialog.Close(); });
-                }
-                catch (Exception)
-                {
-                    // The dialog was closed early; nothing left to do.
-                }
+                captured[0] = RunUpdaterStreaming(arguments, handleLine, delegate(Process startedProcess) { child = startedProcess; });
+                try { dialog.BeginInvoke((MethodInvoker)delegate { dialog.Close(); }); } catch (Exception) { }
             });
 
             dialog.ShowDialog(this);
             ticker.Stop();
             ticker.Dispose();
             updaterBusy = false;
-            if (captured[0] != null) done(captured[0]);
+            if (cancelledByUser) ShowInfo(title, "已取消");
+            else if (captured[0] != null) done(captured[0]);
         }
 
         private void UpdateCore()
         {
-            RunUpdaterWithProgress("update-core", "正在更新 DSH 内核…", delegate(string output)
+            RunUpdaterWithProgress("update-core", "更新 DSH 内核", "DSH 内核", delegate(string output)
             {
                 Dictionary<string, string> info = ParseUpdateOutput(output);
                 if (Get(info, "CORE_UPDATED", "") == "1")
@@ -1181,7 +1338,7 @@ namespace DeepSeekHarness
                 }
                 else
                 {
-                    MessageBox.Show(this, output.Length == 0 ? "更新失败，请检查网络" : output, "内核更新失败",
+                    MessageBox.Show(this, FailureDetail(output), "内核更新失败",
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             });
@@ -1189,7 +1346,7 @@ namespace DeepSeekHarness
 
         private void DownloadShellUpdate()
         {
-            RunUpdaterWithProgress("download-shell", "正在下载 APP 壳…", delegate(string output)
+            RunUpdaterWithProgress("download-shell", "更新 APP 壳", "APP 壳", delegate(string output)
             {
                 Dictionary<string, string> info = ParseUpdateOutput(output);
                 if (Get(info, "SHELL_DOWNLOADED", "") == "1")
@@ -1200,10 +1357,55 @@ namespace DeepSeekHarness
                 }
                 else
                 {
-                    MessageBox.Show(this, output.Length == 0 ? "下载失败，请检查网络" : output, "壳更新下载失败",
+                    MessageBox.Show(this, FailureDetail(output), "壳更新下载失败",
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             });
+        }
+
+        private static string CoreVersion()
+        {
+            try
+            {
+                string path = Path.Combine(Settings.StatePath(), "runtime", "current");
+                if (File.Exists(path)) return File.ReadAllText(path).Trim();
+            }
+            catch (Exception)
+            {
+            }
+            return "";
+        }
+
+        private void ShowAbout()
+        {
+            string core = CoreVersion();
+            MessageBox.Show(this,
+                "壳版本：" + ShellVersion() + "\n" + "内核版本："
+                    + (core.Length == 0 ? "未安装" : core),
+                "关于 DeepSeek Harness", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        /// The updater streams PROGRESS= lines while downloading and prints
+        /// ERROR: <message> when it fails; surface the error (or the tail) so
+        /// the dialog does not become a wall of progress spam.
+        private static string FailureDetail(string output)
+        {
+            string[] lines = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = lines.Length - 1; i >= 0; i--)
+            {
+                string line = lines[i].Trim();
+                if (line.StartsWith("ERROR", StringComparison.Ordinal)) return line;
+            }
+            List<string> tail = new List<string>();
+            for (int i = lines.Length - 1; i >= 0 && tail.Count < 6; i--)
+            {
+                string line = lines[i].Trim();
+                if (line.Length == 0 || line.StartsWith("PROGRESS=", StringComparison.Ordinal)) continue;
+                tail.Add(line);
+            }
+            if (tail.Count == 0) return "请检查网络后重试";
+            tail.Reverse();
+            return string.Join("\n", tail.ToArray());
         }
 
         private void OpenUpdateDirectory()
