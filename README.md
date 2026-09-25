@@ -1,3 +1,21 @@
+> ## ⚠️ 项目已归档，不再更新
+>
+> **官方已发布 DeepSeek Harness 桌面版**，本仓库（第三方原生桌面壳）停止开发与维护，不再发布新版本。
+>
+> 请改用官方渠道：
+>
+> - 官网 / 桌面版下载：https://www.deepseek.com/harness/
+> - 官方仓库：https://github.com/deepseek-ai/deepseek-harness
+> - 官方文档：https://deepseek-harness.github.io/deepseek-harness/
+>
+> 最后发布的版本为 `app-v0.1.7`。已有的 Release 与 asset 保留，但不再提供更新与支持，issue / PR 也不再处理。
+>
+> 如果你仍在使用本壳：
+>
+> - 内核更新走 npm `@deepseek-ai/dsh`，不受本仓库归档影响；
+> - 本仓库停止发布 prebuilt runtime 后，壳会自动回退到「下载 Node + npm 安装」路径，仍然可用；
+> - 建议迁移到官方桌面版，以避免与新内核的兼容性风险。
+
 # DeepSeek Harness Desktop
 
 DeepSeek Harness 桌面壳仓库。

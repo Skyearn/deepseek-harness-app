@@ -2,6 +2,10 @@
 // Shell/Core update helper for DeepSeek Harness desktop apps.
 // Zero-dependency: uses Node builtins only.
 //
+// ARCHIVED: this repository stopped updating when DeepSeek shipped the official
+// desktop app (https://www.deepseek.com/harness/). The code stays for anyone
+// still running the archived shell builds; no further changes are planned.
+//
 // Commands:
 //   node updater.mjs check --shell-current <version>
 //   node updater.mjs update-core
